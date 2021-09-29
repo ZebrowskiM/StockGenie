@@ -1,1 +1,4 @@
 /.DS_Store
+/StockGenie.API/bin/
+/StockGenie.API/obj/
+/StockGenie.DataObjects/obj/
