@@ -1,8 +1,13 @@
 /.DS_Store
 /StockGenie.API/bin/
 /StockGenie.API/obj/
+/StockGenie.DataObjects/bin/
 /StockGenie.DataObjects/obj/
 /StockGenie.DAL/bin/
 /StockGenie.DAL/obj/
 /StockGenie.External/bin/
 /StockGenie.External/obj/
+/StockGenie.External.Crypto/bin/
+/StockGenie.External.Crypto/obj/
+/StockGenie.External.Stocks/obj/
+/StockGenie.External.Stocks/bin/
