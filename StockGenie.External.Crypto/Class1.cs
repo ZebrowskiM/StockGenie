@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace StockGenie.DataObjects
+namespace StockGenie.External.Crypto
 {
     public class Class1
     {
