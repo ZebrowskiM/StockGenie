@@ -3,13 +3,11 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.30114.105
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StockGenie", "StockGenie.API\StockGenie.csproj", "{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StockGenie.DataObjects", "StockGenie.DataObjects\StockGenie.DataObjects.csproj", "{FDA37B43-80F5-4E3E-9EE1-60BF2ADF09AA}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StockGenie.External", "StockGenie.External\StockGenie.External.csproj", "{C192226E-2F94-4261-A796-9633E568CCE4}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StockGenie.Dal", "StockGenie.Dal\StockGenie.Dal.csproj", "{14CA6B8D-FE3D-4564-8710-D9CA2B33FBFA}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StockGenie.Dal", "StockGenie.DAL\StockGenie.DAL.csproj", "{14CA6B8D-FE3D-4564-8710-D9CA2B33FBFA}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StockGenie.External.Stocks", "StockGenie.External.Stocks\StockGenie.External.Stocks.csproj", "{5C94D5C1-E993-4C7F-9A86-C490D4356346}"
 EndProject
@@ -28,18 +26,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Debug|x64.Build.0 = Debug|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Debug|x86.Build.0 = Debug|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Release|Any CPU.Build.0 = Release|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Release|x64.ActiveCfg = Release|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Release|x64.Build.0 = Release|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Release|x86.ActiveCfg = Release|Any CPU
-		{1E6C8E68-A109-4869-9F5B-8BBD98479E3C}.Release|x86.Build.0 = Release|Any CPU
 		{FDA37B43-80F5-4E3E-9EE1-60BF2ADF09AA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{FDA37B43-80F5-4E3E-9EE1-60BF2ADF09AA}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{FDA37B43-80F5-4E3E-9EE1-60BF2ADF09AA}.Debug|x64.ActiveCfg = Debug|Any CPU

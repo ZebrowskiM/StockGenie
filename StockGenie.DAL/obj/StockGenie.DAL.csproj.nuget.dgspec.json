@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "/Users/marekzebrowski/StockGenie/StockGenie.DAL/StockGenie.DAL.csproj": {}
+    "/Users/marekzebrowski/StockGenie/StockGenie.Dal/StockGenie.Dal.csproj": {}
   },
   "projects": {
-    "/Users/marekzebrowski/StockGenie/StockGenie.DAL/StockGenie.DAL.csproj": {
+    "/Users/marekzebrowski/StockGenie/StockGenie.Dal/StockGenie.Dal.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/Users/marekzebrowski/StockGenie/StockGenie.DAL/StockGenie.DAL.csproj",
-        "projectName": "StockGenie.DAL",
-        "projectPath": "/Users/marekzebrowski/StockGenie/StockGenie.DAL/StockGenie.DAL.csproj",
+        "projectUniqueName": "/Users/marekzebrowski/StockGenie/StockGenie.Dal/StockGenie.Dal.csproj",
+        "projectName": "StockGenie.Dal",
+        "projectPath": "/Users/marekzebrowski/StockGenie/StockGenie.Dal/StockGenie.Dal.csproj",
         "packagesPath": "/Users/marekzebrowski/.nuget/packages/",
-        "outputPath": "/Users/marekzebrowski/StockGenie/StockGenie.DAL/obj/",
+        "outputPath": "/Users/marekzebrowski/StockGenie/StockGenie.Dal/obj/",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "/usr/local/share/dotnet/sdk/NuGetFallbackFolder"
