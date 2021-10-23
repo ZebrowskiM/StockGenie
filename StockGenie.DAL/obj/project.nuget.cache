@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "Q5kCCN+g+jBv/Uw9F179ZqApoyTLEtXjdc1Jbyon3brdoEapv3SECFVuzmoKBHyaIxIXtLEceNzjfAKTA+FNOg==",
+  "dgSpecHash": "12ujM+YgQ4nhp/rysCAfCCGs90YdAX2nFNtWu/xsT42JgOX+gPGQgNoNuXq+g/sz4Ut/IvABi2yZOn2fv/gxhQ==",
   "success": true,
-  "projectFilePath": "/Users/marekzebrowski/StockGenie/StockGenie.Dal/StockGenie.Dal.csproj",
+  "projectFilePath": "/Users/marekzebrowski/StockGenie/StockGenie.DAL/StockGenie.DAL.csproj",
   "expectedPackageFiles": [],
   "logs": []
 }

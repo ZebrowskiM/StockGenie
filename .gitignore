@@ -11,3 +11,8 @@
 /StockGenie.External.Crypto/obj/
 /StockGenie.External.Stocks/obj/
 /StockGenie.External.Stocks/bin/
+/StockGenie.Interfaces/bin/
+/StockGenie.Interfaces/obj/
+/StockGenie.Tests/obj/
+/StockGenie.Tests/bin/
+/StockGenie.Tests/TestResults/

@@ -1,4 +1,5 @@
 ﻿using System;
+using StockGenie.Interfaces.DataObjects;
 /*
 Things to include:
 Current Price 
@@ -11,11 +12,22 @@ Div yield (Maybe)
 Market cap 
 Description and Link to site ( maybe )
 Sector / other relational data  ( optional) 
+Exhange info
 */
 namespace StockGenie.DataObjects
 {
-    
-    public class Stock
+    public class Stock : ISecurity
     {
+        public double Bid { get; set; }
+        public double Ask { get; set; }
+        public double YrHigh { get; set; }
+        public double YrLow { get; set; }
+        public double YrAverage { get; set; }
+        public double MovingAverageFifthy { get; set; }
+        public string ExchangeInfo { get; set; }
+        public long MarketCap { get; set; }
+        public long Volume { get; set; }
     }
+
+
 }
