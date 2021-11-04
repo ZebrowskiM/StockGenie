@@ -1,4 +1,6 @@
 using System;
+using StockGenie.Interfaces.DataObjects;
+
 /*
 Things to include:
 Current Price 
@@ -16,7 +18,16 @@ Coin description and maybe usecases  ( optional)
 */
 namespace StockGenie.DataObjects
 {
-    public class Crypto
+    public class Crypto : ISecurity
     {
+        public double Bid { get; set; }
+        public double Ask { get; set; }
+        public double YrHigh { get; set; }
+        public double YrLow { get; set; }
+        public double YrAverage { get; set; }
+        public double MovingAverageFifthy { get; set; }
+        public string ExchangeInfo { get; set; }
+        public long MarketCap { get; set; }
+        public long Volume { get; set; }
     }
 }
