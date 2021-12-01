@@ -19,10 +19,11 @@ namespace StockGenie.Controllers
         }
 
         [HttpGet]
-        public async Task<IActionResult> Get()
+        public async Task<IActionResult> Get(string ticker)
         {
-            
-            return Ok("Please Specify a stock by providing a stock id or Refer to the stock list");
+            if(string.IsNullOrWhiteSpace(ticker))
+                return BadRequest("Please provide a ticker");
+            return Ok( ticker + "Please Specify a stock by providing a stock id or Refer to the stock list");
         }
     }
 }
