@@ -18,8 +18,7 @@ namespace StockGenie.DataObjects
 {
     public class Stock : ISecurity
     {
-        public double Bid { get; set; }
-        public double Ask { get; set; }
+        public double Price {get;set;}
         public double YrHigh { get; set; }
         public double YrLow { get; set; }
         public double YrAverage { get; set; }

@@ -20,8 +20,7 @@ namespace StockGenie.DataObjects
 {
     public class Crypto : ISecurity
     {
-        public double Bid { get; set; }
-        public double Ask { get; set; }
+        public double Price {get;set;}
         public double YrHigh { get; set; }
         public double YrLow { get; set; }
         public double YrAverage { get; set; }
@@ -29,5 +28,6 @@ namespace StockGenie.DataObjects
         public string ExchangeInfo { get; set; }
         public long MarketCap { get; set; }
         public long Volume { get; set; }
+        public string msg {get;set;}
     }
 }
