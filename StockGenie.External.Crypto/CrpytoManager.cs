@@ -3,6 +3,8 @@ using System.Linq;
 using System;
 using CoinGecko.Clients;
 using CoinGecko.Interfaces;
+using StockGenie.DataObjects;
+using System.Collections.Generic;
 
 namespace StockGenie.External.Crypto
 {
@@ -15,6 +17,31 @@ namespace StockGenie.External.Crypto
             _client = CoinGeckoClient.Instance;
             
         }
+
+        public List<CryptoListitem> FetchList()
+        {
+            var list = new List<CryptoListitem>();
+
+            var coin = _client.CoinsClient.GetCoinList();
+            coin.ConfigureAwait(false);
+
+            if (coin.Result == null || !coin.Result.Any())
+            {
+                throw new Exception("Error communicating to Coin API");
+            }
+            foreach (var item in coin.Result)
+            {
+                list.Add(new CryptoListitem
+                {
+                    id = item.Id,
+                    name = item.Name,
+                    ticker = item.Symbol
+                }) ;
+            }
+
+            return list;
+        }
+   
 
         public StockGenie.DataObjects.Crypto FetchCoin( string ticker)
         {
@@ -84,9 +111,10 @@ namespace StockGenie.External.Crypto
         }
 
         private StockGenie.DataObjects.Crypto Convert(CoinGecko.Entities.Response.Coins.CoinFullDataById coinData){
+ 
             return new DataObjects.Crypto{
-                Price = double.Parse(coinData.MarketData.CurrentPrice["USD"].ToString()),
-                MarketCap = long.Parse(coinData.MarketData.MarketCap["USD"].ToString()),
+                Price = double.Parse(coinData.MarketData.CurrentPrice["usd"].ToString()),
+                MarketCap = long.Parse(Math.Round(decimal.Parse(coinData.MarketData.MarketCap["usd"].ToString())).ToString()),
                 ExchangeInfo = string.Join(",",coinData.Platforms.ToList()),
                 
 

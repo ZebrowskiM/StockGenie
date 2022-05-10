@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using StockGenie.External.Crpyto;
+using StockGenie.External.Crypto;
 
 namespace StockGenie.Controllers
 {
@@ -33,11 +33,10 @@ namespace StockGenie.Controllers
 
             var data = _cryptoManager.FetchCoin(ticker);
             if(data.msg != null){
-                return BadRequest(msg);
+                return BadRequest(data.msg);
             }
             else 
-            return data;
-            return Ok("Please Specify a Coin by providing a coin id or Refer to the coin list");
+                return Ok(data);
         }
     }
 }
