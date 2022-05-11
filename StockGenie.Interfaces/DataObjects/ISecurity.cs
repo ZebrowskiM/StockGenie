@@ -5,8 +5,7 @@ namespace StockGenie.Interfaces.DataObjects
 
 public interface ISecurity
 {
-    Double Bid {get;set;}
-    Double Ask {get;set;}
+    Double Price {get;set;}
     Double YrHigh {get;set;}
     Double YrLow {get;set;}
     Double YrAverage {get;set;}

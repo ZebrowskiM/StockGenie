@@ -4,6 +4,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using StockGenie.External.Crypto;
+
 namespace StockGenie.Controllers
 {
 
@@ -12,17 +14,29 @@ namespace StockGenie.Controllers
     public class CoinController : ControllerBase
     {
         private readonly ILogger<CoinController> _logger;
+        private readonly CryptoManager _cryptoManager;
+        
 
         public CoinController(ILogger<CoinController> logger)
         {
             _logger  = logger;
+            _cryptoManager = new CryptoManager();
+            
         }
         
         [HttpGet]
-        public async Task<IActionResult> Get()
+        public async Task<IActionResult> Get(string ticker)
         {
-            
-            return Ok("Please Specify a Coin by providing a coin id or Refer to the coin list");
+            if(string.IsNullOrWhiteSpace(ticker) || ticker.Length > 10)
+                return BadRequest($" \"{ticker}\" is not a valid crypto ticker symbol");
+
+
+            var data = _cryptoManager.FetchCoin(ticker);
+            if(data.msg != null){
+                return BadRequest(data.msg);
+            }
+            else 
+                return Ok(data);
         }
     }
 }
