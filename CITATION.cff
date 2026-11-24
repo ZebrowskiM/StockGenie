@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you reference this software in your work, please cite it using the metadata below."
+title: StockGenie
+type: software
+authors:
+  - family-names: Zebrowski
+    given-names: Marek
+repository-code: https://github.com/ZebrowskiM/StockGenie
+license: Apache-2.0
