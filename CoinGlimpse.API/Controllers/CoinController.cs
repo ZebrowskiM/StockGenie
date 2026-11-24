@@ -38,5 +38,19 @@ namespace CoinGlimpse.Controllers
             else 
                 return Ok(data);
         }
+
+        [HttpGet]
+        [Route("list")]
+        public async Task<IActionResult> Get()
+        {
+            try
+            {
+                return await Task.FromResult(Ok(_cryptoManager.FetchList()));
+            }
+            catch (Exception ex)
+            {
+                return await Task.FromResult(StatusCode(500, ex.Message));
+            }
+        }
     }
 }
