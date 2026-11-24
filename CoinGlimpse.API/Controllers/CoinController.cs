@@ -32,7 +32,7 @@ namespace CoinGlimpse.Controllers
                 return BadRequest($" \"{ticker}\" is not a valid crypto ticker symbol");
 
 
-            var data = _cryptoManager.FetchCoin(ticker);
+            var data = await _cryptoManager.FetchCoin(ticker);
             if(data.msg != null){
                 return BadRequest(data.msg);
             }
@@ -46,7 +46,7 @@ namespace CoinGlimpse.Controllers
         {
             try
             {
-                return await Task.FromResult(Ok(_cryptoManager.FetchList()));
+                return await Task.FromResult(Ok(await _cryptoManager.FetchList()));
             }
             catch (Exception ex)
             {

@@ -26,18 +26,17 @@ namespace CoinGlimpse.External.Crypto
                 : new CoinGeckoClient(new CoinGeckoApiKeyHandler(apiKey));
         }
 
-        public List<CryptoListitem> FetchList()
+        public async Task<List<CryptoListitem>> FetchList()
         {
             var list = new List<CryptoListitem>();
 
-            var coin = _client.CoinsClient.GetCoinList();
-            coin.ConfigureAwait(false);
+            var coins = await _client.CoinsClient.GetCoinList().ConfigureAwait(false);
 
-            if (coin.Result == null || !coin.Result.Any())
+            if (coins == null || !coins.Any())
             {
                 throw new Exception("Error communicating to Coin API");
             }
-            foreach (var item in coin.Result)
+            foreach (var item in coins)
             {
                 list.Add(new CryptoListitem
                 {
@@ -51,29 +50,30 @@ namespace CoinGlimpse.External.Crypto
         }
    
 
-        public CoinGlimpse.DataObjects.Crypto FetchCoin( string ticker)
+        public async Task<CoinGlimpse.DataObjects.Crypto> FetchCoin( string ticker)
         {
+            var input = ticker?.Trim();
+            if (string.IsNullOrEmpty(input))
+            {
+                return new DataObjects.Crypto { msg = "Enter a coin ID or ticker." };
+            }
+
             try
             {
-                var coin = _client.CoinsClient.GetCoinList();
-                coin.ConfigureAwait(false);
-        
-                if(coin.Result == null ||!coin.Result.Any())
+                var coins = await _client.CoinsClient.GetCoinList().ConfigureAwait(false);
+                if (coins == null || !coins.Any())
                 {
                     return new DataObjects.Crypto{
                         msg = "Error communicating to Coin API"
                     };
-                }   
-                var result = coin.Result.ToList().
-                Find(x => x.Symbol.Equals(ticker.Trim(),StringComparison.InvariantCultureIgnoreCase));
-
-                if(result == null)
-                {
-                    result = coin.Result.ToList().
-                    Find(x => x.Id.Equals(ticker.Trim(),StringComparison.InvariantCultureIgnoreCase));
                 }
 
-                if(result == null)
+                var result = coins.FirstOrDefault(
+                    x => string.Equals(x.Symbol, input, StringComparison.OrdinalIgnoreCase))
+                    ?? coins.FirstOrDefault(
+                        x => string.Equals(x.Id, input, StringComparison.OrdinalIgnoreCase));
+
+                if(result is null)
                 {
                     return new DataObjects.Crypto{
                     msg = $" \"{ticker}\" is not a valid coin id or ticker, please try a differenct value "
