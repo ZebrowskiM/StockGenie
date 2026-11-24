@@ -19,4 +19,5 @@
 /.vs/CoinGlimpse/DesignTimeBuild
 /.vs/CoinGlimpse/v17
 /.vs
+/.vscode
 *.user
