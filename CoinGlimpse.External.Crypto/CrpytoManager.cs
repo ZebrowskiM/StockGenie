@@ -11,7 +11,7 @@ using System.Threading.Tasks;
 
 namespace CoinGlimpse.External.Crypto
 {
-    public class CryptoManager
+    public class CryptoManager : ICryptoManager
     {
         private readonly ICoinGeckoClient _client;
 

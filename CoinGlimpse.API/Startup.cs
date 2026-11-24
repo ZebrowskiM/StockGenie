@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.OpenApi.Models;
+using CoinGlimpse.External.Crypto;
 
 namespace CoinGlimpse
 {
@@ -28,6 +29,8 @@ namespace CoinGlimpse
         {
 
             services.AddControllers();
+            services.AddSingleton<ICryptoManager>(
+                new CryptoManager(Configuration["CoinGecko:ApiKey"]));
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "CoinGlimpse", Version = "v1" });

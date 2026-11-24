@@ -4,7 +4,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Configuration;
 using CoinGlimpse.External.Crypto;
 
 namespace CoinGlimpse.Controllers
@@ -15,13 +14,13 @@ namespace CoinGlimpse.Controllers
     public class CoinController : ControllerBase
     {
         private readonly ILogger<CoinController> _logger;
-        private readonly CryptoManager _cryptoManager;
+        private readonly ICryptoManager _cryptoManager;
         
 
-        public CoinController(ILogger<CoinController> logger, IConfiguration configuration)
+        public CoinController(ILogger<CoinController> logger, ICryptoManager cryptoManager)
         {
             _logger  = logger;
-            _cryptoManager = new CryptoManager(configuration["CoinGecko:ApiKey"]);
+            _cryptoManager = cryptoManager;
             
         }
         
