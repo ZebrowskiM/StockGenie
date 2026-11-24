@@ -5,6 +5,9 @@ using CoinGecko.Clients;
 using CoinGecko.Interfaces;
 using CoinGlimpse.DataObjects;
 using System.Collections.Generic;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CoinGlimpse.External.Crypto
 {
@@ -13,9 +16,14 @@ namespace CoinGlimpse.External.Crypto
         private readonly ICoinGeckoClient _client;
 
         public CryptoManager(){
-        
             _client = CoinGeckoClient.Instance;
-            
+        }
+
+        public CryptoManager(string apiKey)
+        {
+            _client = string.IsNullOrWhiteSpace(apiKey)
+                ? CoinGeckoClient.Instance
+                : new CoinGeckoClient(new CoinGeckoApiKeyHandler(apiKey));
         }
 
         public List<CryptoListitem> FetchList()
@@ -129,6 +137,23 @@ namespace CoinGlimpse.External.Crypto
            data.ConfigureAwait(false);
            return data.Result;
         }
-       
+
+        private sealed class CoinGeckoApiKeyHandler : HttpClientHandler
+        {
+            private readonly string _apiKey;
+
+            public CoinGeckoApiKeyHandler(string apiKey)
+            {
+                _apiKey = apiKey;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request,
+                CancellationToken cancellationToken)
+            {
+                request.Headers.Add("x-cg-demo-api-key", _apiKey);
+                return base.SendAsync(request, cancellationToken);
+            }
+        }
     }
 }
