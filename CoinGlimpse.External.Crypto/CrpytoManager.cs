@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
@@ -24,93 +23,63 @@ namespace CoinGlimpse.External.Crypto
         private readonly HttpClient _httpClient;
         private readonly ILogger<CryptoManager> _logger;
         private readonly CoinGeckoOptions _options;
-        private readonly SemaphoreSlim _listLock = new SemaphoreSlim(1, 1);
-        private readonly ConcurrentDictionary<string, CacheEntry<List<CryptoListitem>>> _listCache =
-            new ConcurrentDictionary<string, CacheEntry<List<CryptoListitem>>>(StringComparer.Ordinal);
+        private readonly CoinCatalogCache _catalog;
 
         public CryptoManager(
             HttpClient httpClient,
             ILogger<CryptoManager> logger,
-            IOptions<CoinGeckoOptions> options)
+            IOptions<CoinGeckoOptions> options,
+            CoinCatalogCache catalog = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
 
+            _catalog = catalog ?? new CoinCatalogCache(TimeProvider.System);
             ValidateBaseUrl();
             ConfigureHttpClient();
         }
 
-        public async Task<List<CryptoListitem>> FetchList(
-            CancellationToken cancellationToken = default)
+        public Task<List<CryptoListitem>> FetchList(CancellationToken cancellationToken = default)
         {
-            var cacheKey = "coin-list";
-            if (_listCache.TryGetValue(cacheKey, out var cacheEntry) &&
-                cacheEntry.ExpiresAtUtc > DateTimeOffset.UtcNow)
-            {
-                if (_options.EnableRequestLogging && _logger.IsEnabled(LogLevel.Debug))
-                {
-                    _logger.LogDebug("Coin list returned from cache");
-                }
+            return _catalog.GetAsync(LoadCatalogAsync, _options.ListCacheDuration, cancellationToken);
+        }
 
-                return Copy(cacheEntry.Value);
+        private async Task<List<CryptoListitem>> LoadCatalogAsync(CancellationToken cancellationToken)
+        {
+            using var response = await SendWithRetryAsync(
+                "coins/list",
+                "coins/list",
+                cancellationToken).ConfigureAwait(false);
+
+            var coins = await ReadJsonAsync<List<CoinListItem>>(
+                response,
+                "coins/list",
+                cancellationToken).ConfigureAwait(false);
+
+            var result = coins
+                .Where(x => !string.IsNullOrWhiteSpace(x.Id))
+                .Select(x => new CryptoListitem
+                {
+                    id = x.Id,
+                    name = x.Name,
+                    ticker = x.Symbol
+                })
+                .ToList();
+
+            if (result.Count == 0)
+            {
+                throw new InvalidOperationException("CoinGecko returned an empty coin list.");
             }
 
-            await _listLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
+            if (_options.EnableRequestLogging && _logger.IsEnabled(LogLevel.Information))
             {
-                if (_listCache.TryGetValue(cacheKey, out cacheEntry) &&
-                    cacheEntry.ExpiresAtUtc > DateTimeOffset.UtcNow)
-                {
-                    return Copy(cacheEntry.Value);
-                }
-
-                using var response = await SendWithRetryAsync(
-                    "coins/list",
-                    "coins/list",
-                    cancellationToken).ConfigureAwait(false);
-
-                var coins = await ReadJsonAsync<List<CoinListItem>>(
-                    response,
-                    "coins/list",
-                    cancellationToken).ConfigureAwait(false);
-
-                var result = coins
-                    .Where(x => !string.IsNullOrWhiteSpace(x.Id))
-                    .Select(x => new CryptoListitem
-                    {
-                        id = x.Id,
-                        name = x.Name,
-                        ticker = x.Symbol
-                    })
-                    .ToList();
-
-                if (result.Count == 0)
-                {
-                    throw new InvalidOperationException("CoinGecko returned an empty coin list.");
-                }
-
-                var duration = _options.ListCacheDuration > TimeSpan.Zero
-                    ? _options.ListCacheDuration
-                    : TimeSpan.FromMinutes(10);
-                _listCache[cacheKey] = new CacheEntry<List<CryptoListitem>>(
-                    result,
-                    DateTimeOffset.UtcNow.Add(duration));
-
-                if (_options.EnableRequestLogging && _logger.IsEnabled(LogLevel.Information))
-                {
-                    _logger.LogInformation(
-                        "CoinGecko coin list loaded successfully. Count={Count} CacheDurationSeconds={CacheDurationSeconds}",
-                        result.Count,
-                        duration.TotalSeconds);
-                }
-
-                return Copy(result);
+                _logger.LogInformation(
+                    "CoinGecko coin list loaded successfully. Count={Count}",
+                    result.Count);
             }
-            finally
-            {
-                _listLock.Release();
-            }
+
+            return result;
         }
 
         public Task<DataObjects.Crypto> FetchCoin(
@@ -520,28 +489,6 @@ namespace CoinGlimpse.External.Crypto
                 Volume = (long)Math.Round(volume ?? 0, MidpointRounding.AwayFromZero),
                 ExchangeInfo = platformNames
             };
-        }
-
-        private static List<CryptoListitem> Copy(List<CryptoListitem> source)
-        {
-            return source.Select(x => new CryptoListitem
-            {
-                id = x.id,
-                name = x.name,
-                ticker = x.ticker
-            }).ToList();
-        }
-
-        private sealed class CacheEntry<T>
-        {
-            public CacheEntry(T value, DateTimeOffset expiresAtUtc)
-            {
-                Value = value;
-                ExpiresAtUtc = expiresAtUtc;
-            }
-
-            public T Value { get; }
-            public DateTimeOffset ExpiresAtUtc { get; }
         }
 
         private sealed class CoinListItem
