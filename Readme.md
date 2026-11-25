@@ -46,13 +46,14 @@ Relevant settings and defaults in `CoinGlimpse.API\appsettings.json`:
 | `CoinGecko:BaseUrl` | `https://api.coingecko.com/api/v3/` | CoinGecko API base URL. |
 | `CoinGecko:Plan` | `Demo` | Selects Demo or Pro key header. |
 | `CoinGecko:ListCacheDuration` | `00:10:00` | Coin-list cache lifetime. |
-| `CoinGecko:CoinCacheDuration` | `00:01:00` | Coin-detail cache lifetime. |
 | `CoinGecko:MaxRetryAttempts` | `2` | Retries for rate-limit and server-error responses (capped at five). |
+| `CoinGecko:EnableRequestLogging` | `false` | Enables routine request lifecycle and cache diagnostics. |
 
-Cache entries are held in each `CryptoManager` instance. With the current typed
-`HttpClient` registration, these cached results do not persist across separate
-API requests. The cached benchmark cases measure repeated calls on the same
-manager instance.
+Coin details and prices are not cached; each coin lookup requests current
+CoinGecko market data. Only the coin list is cached, using the configured
+`ListCacheDuration`; the list cache is per `CryptoManager` instance and does not
+persist across separate API requests with the current typed `HttpClient`
+registration.
 
 Only HTTPS base URLs are accepted, except loopback URLs for local development.
 The client uses a 30-second timeout, disables automatic redirects, and observes
@@ -61,18 +62,25 @@ capped at 30 seconds. Responses larger than 10 MB are rejected.
 
 ## Logging
 
-The wrapper uses the application-provided `ILogger`. It records the endpoint
-template, attempt number, HTTP status, elapsed time, cache hits, and failures.
-It does not log the API key, full request URL/query string, or response body.
-Adjust verbosity using the standard ASP.NET Core `Logging:LogLevel` settings.
+The wrapper uses the application-provided `ILogger`. Set
+`CoinGecko:EnableRequestLogging` to `true` to log request starts/completions,
+HTTP method, endpoint template, attempt/status, elapsed time, response content
+length, list-cache hits, and list refresh counts/cache duration. It defaults to
+`false`; with it disabled, routine request logs and timing measurements are
+skipped. Warnings and errors (including retry details) are still logged.
+
+The wrapper does not log API keys, full request URLs/query strings, or response
+bodies. `Logging:LogLevel` continues to control the emitted levels; for example,
+request lifecycle details are logged at Information and cache hits at Debug.
 
 ## Performance benchmarks
 
 `CoinGlimpse.Benchmarks` compares cold list and coin lookups with the former
 `CoinGeckoAsyncApi` 1.5.0 client. The old package is referenced only by the
 benchmark project; it is not a production dependency. The benchmarks also
-measure cached calls to the new wrapper. A deterministic local HTTP handler
-avoids network variation and API rate limits.
+measure cached coin-list calls; coin-detail lookups are always cold because
+prices are not cached. A deterministic local HTTP handler avoids network
+variation and API rate limits.
 
 Run the benchmark suite in Release mode:
 

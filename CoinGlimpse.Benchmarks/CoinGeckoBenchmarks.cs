@@ -19,8 +19,7 @@ public abstract class CoinGeckoBenchmarkBase
             Options.Create(new CoinGeckoOptions
             {
                 BaseUrl = "https://api.coingecko.com/api/v3/",
-                ListCacheDuration = TimeSpan.FromMinutes(10),
-                CoinCacheDuration = TimeSpan.FromMinutes(10)
+                ListCacheDuration = TimeSpan.FromMinutes(10)
             }));
     }
 
@@ -149,15 +148,6 @@ public class CoinDetailBenchmarks : CoinGeckoBenchmarkBase
     private CryptoManager _currentManager = null!;
     private HttpClient _currentHttpClient = null!;
     private CoinGeckoClient _legacyClient = null!;
-    private CryptoManager _cachedManager = null!;
-    private HttpClient _cachedHttpClient = null!;
-
-    [GlobalSetup]
-    public async Task SetupCacheBenchmark()
-    {
-        _cachedManager = NewManager(out _cachedHttpClient);
-        VerifyCoin(await _cachedManager.FetchCoin("btc"));
-    }
 
     [IterationSetup]
     public void SetupColdBenchmarks()
@@ -171,12 +161,6 @@ public class CoinDetailBenchmarks : CoinGeckoBenchmarkBase
     {
         _currentHttpClient.Dispose();
         _legacyClient.Dispose();
-    }
-
-    [GlobalCleanup]
-    public void CleanupCacheBenchmark()
-    {
-        _cachedHttpClient.Dispose();
     }
 
     [Benchmark(Baseline = true, Description = "CoinGeckoAsyncApi 1.5.0")]
@@ -201,14 +185,6 @@ public class CoinDetailBenchmarks : CoinGeckoBenchmarkBase
     public async Task<double> CurrentFetchCoin()
     {
         var coin = await _currentManager.FetchCoin("btc");
-        VerifyCoin(coin);
-        return coin.Price + coin.MarketCap;
-    }
-
-    [Benchmark(Description = "Custom wrapper, cached coin")]
-    public async Task<double> CachedFetchCoin()
-    {
-        var coin = await _cachedManager.FetchCoin("btc");
         VerifyCoin(coin);
         return coin.Price + coin.MarketCap;
     }
