@@ -113,7 +113,7 @@ dependencies and CoinGecko data are not covered by this grant and remain
 subject to their own terms.
 
 If you reference this project in a paper, post, or other work, please cite
-[Marek Zebrowski's CoinGlimpse](https://github.com/ZebrowskiM/StockGenie).
+[Marek Zebrowski's CoinGlimpse](https://github.com/ZebrowskiM/CoinGlimpse).
 GitHub's **Cite this repository** button uses the metadata in
 [CITATION.cff](CITATION.cff). If reproducibility matters, include the commit
 you used.
