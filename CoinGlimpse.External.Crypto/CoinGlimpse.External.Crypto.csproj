@@ -4,10 +4,6 @@
     <TargetFramework>net11.0</TargetFramework>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="CoinGeckoAsyncApi" Version="1.5.0" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\CoinGlimpse.DataObjects\CoinGlimpse.DataObjects.csproj" />

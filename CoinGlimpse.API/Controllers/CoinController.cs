@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -31,7 +32,9 @@ namespace CoinGlimpse.Controllers
                 return BadRequest($" \"{ticker}\" is not a valid crypto ticker symbol");
 
 
-            var data = await _cryptoManager.FetchCoin(ticker);
+            var data = await _cryptoManager.FetchCoin(
+                ticker,
+                ControllerContext.HttpContext?.RequestAborted ?? CancellationToken.None);
             if(data.msg != null){
                 return BadRequest(data.msg);
             }
@@ -45,7 +48,9 @@ namespace CoinGlimpse.Controllers
         {
             try
             {
-                return await Task.FromResult(Ok(await _cryptoManager.FetchList()));
+                return await Task.FromResult(
+                    Ok(await _cryptoManager.FetchList(
+                        ControllerContext.HttpContext?.RequestAborted ?? CancellationToken.None)));
             }
             catch (Exception ex)
             {

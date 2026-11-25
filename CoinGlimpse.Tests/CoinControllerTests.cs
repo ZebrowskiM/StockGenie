@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using CoinGlimpse.Controllers;
 using CoinGlimpse.DataObjects;
@@ -99,7 +100,8 @@ public class CoinControllerTests
         public int FetchCoinCalls { get; private set; }
         public string LastTicker { get; private set; }
 
-        public Task<List<CryptoListitem>> FetchList()
+        public Task<List<CryptoListitem>> FetchList(
+            CancellationToken cancellationToken = default)
         {
             if (ListException != null)
             {
@@ -109,7 +111,9 @@ public class CoinControllerTests
             return Task.FromResult(ListResult);
         }
 
-        public Task<Crypto> FetchCoin(string ticker)
+        public Task<Crypto> FetchCoin(
+            string ticker,
+            CancellationToken cancellationToken = default)
         {
             FetchCoinCalls++;
             LastTicker = ticker;

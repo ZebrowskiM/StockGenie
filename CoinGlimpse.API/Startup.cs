@@ -12,6 +12,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.OpenApi.Models;
 using CoinGlimpse.External.Crypto;
+using System.Net.Http;
 
 namespace CoinGlimpse
 {
@@ -29,8 +30,14 @@ namespace CoinGlimpse
         {
 
             services.AddControllers();
-            services.AddSingleton<ICryptoManager>(
-                new CryptoManager(Configuration["CoinGecko:ApiKey"]));
+            services.Configure<CoinGeckoOptions>(
+                Configuration.GetSection(CoinGeckoOptions.SectionName));
+            services.AddHttpClient<ICryptoManager, CryptoManager>()
+                .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+                {
+                    AllowAutoRedirect = false,
+                    PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+                });
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "CoinGlimpse", Version = "v1" });
