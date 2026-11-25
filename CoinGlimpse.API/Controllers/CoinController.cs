@@ -26,7 +26,7 @@ namespace CoinGlimpse.Controllers
         }
         
         [HttpGet]
-        public async Task<IActionResult> Get(string ticker)
+        public async Task<IActionResult> Get(string ticker, string currency = "usd")
         {
             if(string.IsNullOrWhiteSpace(ticker) || ticker.Length > 10)
                 return BadRequest($" \"{ticker}\" is not a valid crypto ticker symbol");
@@ -34,6 +34,7 @@ namespace CoinGlimpse.Controllers
 
             var data = await _cryptoManager.FetchCoin(
                 ticker,
+                currency,
                 ControllerContext.HttpContext?.RequestAborted ?? CancellationToken.None);
             if(data.msg != null){
                 return BadRequest(data.msg);

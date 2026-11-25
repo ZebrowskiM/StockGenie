@@ -182,7 +182,7 @@ public class CoinDetailBenchmarks : CoinGeckoBenchmarkBase
     }
 
     [Benchmark(Description = "Custom wrapper, cold coin")]
-    public async Task<double> CurrentFetchCoin()
+    public async Task<decimal> CurrentFetchCoin()
     {
         var coin = await _currentManager.FetchCoin("btc");
         VerifyCoin(coin);
