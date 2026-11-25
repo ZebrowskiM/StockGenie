@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
@@ -54,7 +55,16 @@ namespace CoinGlimpse.Controllers
             var cancellationToken = ControllerContext.HttpContext?.RequestAborted ?? CancellationToken.None;
             try
             {
-                return Ok(await _cryptoManager.FetchList(cancellationToken));
+                var catalog = await _cryptoManager.FetchCatalog(cancellationToken);
+                if (catalog.Age is TimeSpan age && ControllerContext.HttpContext is { } context)
+                {
+                    context.Response.Headers["CoinGlimpse-Catalog-Age-Seconds"] =
+                        ((long)age.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+                    context.Response.Headers["CoinGlimpse-Catalog-Stale"] =
+                        catalog.IsStale ? "true" : "false";
+                }
+
+                return Ok(catalog.Coins);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

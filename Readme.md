@@ -77,6 +77,11 @@ fails or returns an empty list, callers can use the previous catalog during
 the configured stale window. Once that window ends, callers receive the error.
 The next request after the backoff can retry, including after a failed first load.
 
+Successful `GET /api/coin/list` responses include `CoinGlimpse-Catalog-Age-Seconds`
+with whole seconds since the last successful fetch and `CoinGlimpse-Catalog-Stale`
+with `true` when the catalog has passed its configured lifetime. The body is
+the array of coins. These headers describe the catalog.
+
 Only HTTPS base URLs are accepted, except loopback URLs for local development.
 The client uses a 30-second timeout, disables automatic redirects, and observes
 request cancellation. Retry delays honor `Retry-After` when supplied and are

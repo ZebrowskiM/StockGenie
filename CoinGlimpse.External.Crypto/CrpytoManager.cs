@@ -40,10 +40,11 @@ namespace CoinGlimpse.External.Crypto
             ConfigureHttpClient();
         }
 
-        public Task<List<CryptoListitem>> FetchList(CancellationToken cancellationToken = default)
-        {
-            return _catalog.GetAsync(LoadCatalogAsync, _options, cancellationToken);
-        }
+        public async Task<List<CryptoListitem>> FetchList(CancellationToken cancellationToken = default) =>
+            (await FetchCatalog(cancellationToken).ConfigureAwait(false)).Coins;
+
+        public Task<CoinCatalogRead> FetchCatalog(CancellationToken cancellationToken = default) =>
+            _catalog.GetAsync(LoadCatalogAsync, _options, cancellationToken);
 
         private async Task<List<CryptoListitem>> LoadCatalogAsync(CancellationToken cancellationToken)
         {

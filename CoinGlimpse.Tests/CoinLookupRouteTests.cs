@@ -77,6 +77,41 @@ public class CoinLookupRouteTests
         }
     }
 
+    [TestMethod]
+    public async Task ListReportsCatalogAgeDuringFallbackAndStopsServingAfterExpiry()
+    {
+        var clock = new CatalogClock();
+        using var handler = new FixtureHandler("bitcoin");
+        using var upstream = new HttpClient(handler);
+        await using var app = CreateApp(upstream, new CoinCatalogCache(clock));
+        await app.StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+
+        using var fresh = await client.GetAsync("/api/coin/list");
+        Assert.AreEqual(HttpStatusCode.OK, fresh.StatusCode);
+        Assert.AreEqual("0", fresh.Headers.GetValues("CoinGlimpse-Catalog-Age-Seconds").Single());
+        Assert.AreEqual("false", fresh.Headers.GetValues("CoinGlimpse-Catalog-Stale").Single());
+
+        clock.Now += TimeSpan.FromMinutes(10);
+        handler.FailCatalog = true;
+        using var stale = await client.GetAsync("/api/coin/list");
+        Assert.AreEqual(HttpStatusCode.OK, stale.StatusCode);
+        Assert.AreEqual("600", stale.Headers.GetValues("CoinGlimpse-Catalog-Age-Seconds").Single());
+        Assert.AreEqual("true", stale.Headers.GetValues("CoinGlimpse-Catalog-Stale").Single());
+        Assert.AreEqual(await fresh.Content.ReadAsStringAsync(), await stale.Content.ReadAsStringAsync());
+
+        clock.Now += TimeSpan.FromMinutes(30);
+        using var expired = await client.GetAsync("/api/coin/list");
+        await CheckProviderFailure(expired);
+        Assert.AreEqual(false, expired.Headers.Contains("CoinGlimpse-Catalog-Age-Seconds"));
+    }
+
+    private sealed class CatalogClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UnixEpoch;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
     private static async Task CheckProviderFailure(HttpResponseMessage response)
     {
         Assert.AreEqual(HttpStatusCode.BadGateway, response.StatusCode);
@@ -86,13 +121,13 @@ public class CoinLookupRouteTests
             body.RootElement.GetProperty("message").GetString());
     }
 
-    private static WebApplication CreateApp(HttpClient upstream)
+    private static WebApplication CreateApp(HttpClient upstream, CoinCatalogCache cache = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Services.AddControllers().AddApplicationPart(typeof(CoinController).Assembly);
         builder.Services.AddSingleton<ICryptoManager>(new CryptoManager(upstream,
-            NullLogger<CryptoManager>.Instance, Options.Create(new CoinGeckoOptions { ApiKey = "fixture", MaxRetryAttempts = 0 })));
+            NullLogger<CryptoManager>.Instance, Options.Create(new CoinGeckoOptions { ApiKey = "fixture", MaxRetryAttempts = 0 }), cache));
         var app = builder.Build();
         app.MapControllers();
         return app;

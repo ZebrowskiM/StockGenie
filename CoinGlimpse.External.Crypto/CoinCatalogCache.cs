@@ -17,7 +17,7 @@ namespace CoinGlimpse.External.Crypto
         private Snapshot _lastGood;
         private DateTimeOffset _nextAttempt;
 
-        internal async Task<List<CryptoListitem>> GetAsync(
+        internal async Task<CoinCatalogRead> GetAsync(
             Func<CancellationToken, Task<List<CryptoListitem>>> load,
             CoinGeckoOptions options,
             CancellationToken cancellationToken)
@@ -48,10 +48,13 @@ namespace CoinGlimpse.External.Crypto
                 }
             }
 
-            return snapshot.Coins.Select(c => new CryptoListitem
+            var coins = snapshot.Coins.Select(c => new CryptoListitem
             {
                 id = c.id, name = c.name, ticker = c.ticker
             }).ToList();
+            var now = clock.GetUtcNow();
+            var age = now >= snapshot.FetchedAt ? now - snapshot.FetchedAt : TimeSpan.Zero;
+            return new CoinCatalogRead(coins, age, now >= snapshot.FreshUntil);
         }
 
         private async Task<Snapshot> RefreshAsync(
@@ -65,8 +68,9 @@ namespace CoinGlimpse.External.Crypto
                     ? options.ListCacheDuration : TimeSpan.FromMinutes(10);
                 lock (_gate)
                 {
-                    _nextAttempt = clock.GetUtcNow() + ttl;
-                    _lastGood = new Snapshot(coins, _nextAttempt + (options.ListMaxStaleDuration > TimeSpan.Zero ? options.ListMaxStaleDuration : TimeSpan.Zero));
+                    var fetchedAt = clock.GetUtcNow();
+                    _nextAttempt = fetchedAt + ttl;
+                    _lastGood = new Snapshot(coins, fetchedAt, _nextAttempt, _nextAttempt + (options.ListMaxStaleDuration > TimeSpan.Zero ? options.ListMaxStaleDuration : TimeSpan.Zero));
                     return _lastGood;
                 }
             }
@@ -82,6 +86,7 @@ namespace CoinGlimpse.External.Crypto
             ex is HttpRequestException or IOException or JsonException or InvalidOperationException
                 or OperationCanceledException or CoinGeckoApiException;
 
-        private sealed record Snapshot(List<CryptoListitem> Coins, DateTimeOffset StaleUntil);
+        private sealed record Snapshot(List<CryptoListitem> Coins, DateTimeOffset FetchedAt,
+            DateTimeOffset FreshUntil, DateTimeOffset StaleUntil);
     }
 }
