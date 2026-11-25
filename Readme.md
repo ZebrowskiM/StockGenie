@@ -9,7 +9,18 @@ wrapper rather than a third-party CoinGecko SDK.
 | CoinGlimpse route | CoinGecko route | Description |
 |---|---|---|
 | `GET /api/coin/list` | `/coins/list` | Returns supported coin IDs, names, and symbols. |
-| `GET /api/coin?ticker=btc` | `/coins/{id}` | Looks up a ticker or CoinGecko ID (the API route currently limits input to 10 characters) and returns USD price, market cap, volume, and platform information. |
+| `GET /api/coin?ticker=btc&currency=eur` | `/coins/{id}` | Looks up a ticker or CoinGecko ID and returns price, market cap, and volume in the selected currency. |
+
+The `currency` query parameter defaults to `usd`. For example,
+`GET /api/coin?ticker=btc` returns USD values, while adding
+`&currency=eur` requests EUR values. The response includes a `Currency` field
+(`USD`, `EUR`, etc.) so clients can label the price and related market values.
+Prices are returned as decimal JSON numbers without scientific notation (for
+example, `0.00001001`).
+Use a 2-10 character alphanumeric CoinGecko-supported currency code. If a
+currency is malformed or unavailable for that coin, the API returns a
+`BadRequest` response instead of silently substituting USD.
+See CoinGecko's [live list of supported currencies](https://api.coingecko.com/api/v3/simple/supported_vs_currencies).
 
 ## Build and run
 

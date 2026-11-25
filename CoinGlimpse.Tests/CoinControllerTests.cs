@@ -15,7 +15,7 @@ public class CoinControllerTests
     [TestMethod]
     public async Task Get_ReturnsOk_WhenCoinIsFound()
     {
-        var expected = new Crypto { Price = 42.5 };
+        var expected = new Crypto { Price = 42.5m, Currency = "USD" };
         var manager = new FakeCryptoManager { CoinResult = expected };
         var controller = CreateController(manager);
 
@@ -25,6 +25,22 @@ public class CoinControllerTests
         Assert.IsNotNull(okResult);
         Assert.AreSame(expected, okResult.Value);
         Assert.AreEqual("btc", manager.LastTicker);
+        Assert.AreEqual("usd", manager.LastCurrency);
+    }
+
+    [TestMethod]
+    public async Task Get_ForwardsSelectedCurrency()
+    {
+        var manager = new FakeCryptoManager
+        {
+            CoinResult = new Crypto { Price = 45.5m, Currency = "EUR" }
+        };
+        var controller = CreateController(manager);
+
+        var result = await controller.Get("btc", "eur");
+
+        Assert.IsInstanceOfType(result, typeof(OkObjectResult));
+        Assert.AreEqual("eur", manager.LastCurrency);
     }
 
     [TestMethod]
@@ -99,6 +115,7 @@ public class CoinControllerTests
         public Exception ListException { get; set; }
         public int FetchCoinCalls { get; private set; }
         public string LastTicker { get; private set; }
+        public string LastCurrency { get; private set; }
 
         public Task<List<CryptoListitem>> FetchList(
             CancellationToken cancellationToken = default)
@@ -115,8 +132,17 @@ public class CoinControllerTests
             string ticker,
             CancellationToken cancellationToken = default)
         {
+            return FetchCoin(ticker, "usd", cancellationToken);
+        }
+
+        public Task<Crypto> FetchCoin(
+            string ticker,
+            string currency,
+            CancellationToken cancellationToken = default)
+        {
             FetchCoinCalls++;
             LastTicker = ticker;
+            LastCurrency = currency;
             return Task.FromResult(CoinResult);
         }
     }
