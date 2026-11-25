@@ -11,5 +11,9 @@ namespace CoinGlimpse.External.Crypto
         Task<CoinGlimpse.DataObjects.Crypto> FetchCoin(
             string ticker,
             CancellationToken cancellationToken = default);
+        Task<CoinGlimpse.DataObjects.Crypto> FetchCoin(
+            string ticker,
+            string currency,
+            CancellationToken cancellationToken = default);
     }
 }

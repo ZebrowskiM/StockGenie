@@ -20,7 +20,8 @@ namespace CoinGlimpse.DataObjects
 {
     public class Crypto : ISecurity
     {
-        public double Price {get;set;}
+        public decimal Price { get; set; }
+        public string Currency { get; set; }
         public double YrHigh { get; set; }
         public double YrLow { get; set; }
         public double YrAverage { get; set; }
