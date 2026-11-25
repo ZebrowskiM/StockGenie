@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\CoinGlimpse.API\CoinGlimpse.API.csproj" />
     <ProjectReference Include="..\CoinGlimpse.External.Crypto\CoinGlimpse.External.Crypto.csproj" />
   </ItemGroup>
 

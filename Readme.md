@@ -1,10 +1,22 @@
-<h1>CoinGlimpse</h1>
+
+# CoinGlimpse
 
 ## What is it?
-Stock Genie is an api that can retrieve, track and analyze prices of crpyto currencies
+
+Stock Genie is an api wrapper around coingecko demo API that can retrieve, track and analyze prices of crpyto currencies. Offering TA and Analyze tools to allow for integration with your front ends.
 
 ## Build Instructions
+
 Configure the port number and build the `CoinGlimpse.API` project
+
+## Setting Coingecko API Key
+
+Replace the API key and run this in CLI
+
+``` bash
+dotnet user-secrets init --project .\CoinGlimpse.API
+dotnet user-secrets set "CoinGecko:ApiKey" "YOUR_KEY" --project .\CoinGlimpse.API 
+```
 
 ## License and citation
 

@@ -5,31 +5,38 @@ using CoinGecko.Clients;
 using CoinGecko.Interfaces;
 using CoinGlimpse.DataObjects;
 using System.Collections.Generic;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CoinGlimpse.External.Crypto
 {
-    public class CryptoManager
+    public class CryptoManager : ICryptoManager
     {
         private readonly ICoinGeckoClient _client;
 
         public CryptoManager(){
-        
             _client = CoinGeckoClient.Instance;
-            
         }
 
-        public List<CryptoListitem> FetchList()
+        public CryptoManager(string apiKey)
+        {
+            _client = string.IsNullOrWhiteSpace(apiKey)
+                ? CoinGeckoClient.Instance
+                : new CoinGeckoClient(new CoinGeckoApiKeyHandler(apiKey));
+        }
+
+        public async Task<List<CryptoListitem>> FetchList()
         {
             var list = new List<CryptoListitem>();
 
-            var coin = _client.CoinsClient.GetCoinList();
-            coin.ConfigureAwait(false);
+            var coins = await _client.CoinsClient.GetCoinList().ConfigureAwait(false);
 
-            if (coin.Result == null || !coin.Result.Any())
+            if (coins == null || !coins.Any())
             {
                 throw new Exception("Error communicating to Coin API");
             }
-            foreach (var item in coin.Result)
+            foreach (var item in coins)
             {
                 list.Add(new CryptoListitem
                 {
@@ -43,29 +50,30 @@ namespace CoinGlimpse.External.Crypto
         }
    
 
-        public CoinGlimpse.DataObjects.Crypto FetchCoin( string ticker)
+        public async Task<CoinGlimpse.DataObjects.Crypto> FetchCoin( string ticker)
         {
+            var input = ticker?.Trim();
+            if (string.IsNullOrEmpty(input))
+            {
+                return new DataObjects.Crypto { msg = "Enter a coin ID or ticker." };
+            }
+
             try
             {
-                var coin = _client.CoinsClient.GetCoinList();
-                coin.ConfigureAwait(false);
-        
-                if(coin.Result == null ||!coin.Result.Any())
+                var coins = await _client.CoinsClient.GetCoinList().ConfigureAwait(false);
+                if (coins == null || !coins.Any())
                 {
                     return new DataObjects.Crypto{
                         msg = "Error communicating to Coin API"
                     };
-                }   
-                var result = coin.Result.ToList().
-                Find(x => x.Symbol.Equals(ticker.Trim(),StringComparison.InvariantCultureIgnoreCase));
-
-                if(result == null)
-                {
-                    result = coin.Result.ToList().
-                    Find(x => x.Id.Equals(ticker.Trim(),StringComparison.InvariantCultureIgnoreCase));
                 }
 
-                if(result == null)
+                var result = coins.FirstOrDefault(
+                    x => string.Equals(x.Symbol, input, StringComparison.OrdinalIgnoreCase))
+                    ?? coins.FirstOrDefault(
+                        x => string.Equals(x.Id, input, StringComparison.OrdinalIgnoreCase));
+
+                if(result is null)
                 {
                     return new DataObjects.Crypto{
                     msg = $" \"{ticker}\" is not a valid coin id or ticker, please try a differenct value "
@@ -129,6 +137,23 @@ namespace CoinGlimpse.External.Crypto
            data.ConfigureAwait(false);
            return data.Result;
         }
-       
+
+        private sealed class CoinGeckoApiKeyHandler : HttpClientHandler
+        {
+            private readonly string _apiKey;
+
+            public CoinGeckoApiKeyHandler(string apiKey)
+            {
+                _apiKey = apiKey;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request,
+                CancellationToken cancellationToken)
+            {
+                request.Headers.Add("x-cg-demo-api-key", _apiKey);
+                return base.SendAsync(request, cancellationToken);
+            }
+        }
     }
 }
