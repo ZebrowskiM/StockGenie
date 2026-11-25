@@ -16,6 +16,9 @@ Matching ignores case and gives a canonical ID priority over a symbol.
 If several IDs share a symbol, the route returns HTTP 409 with a body such as
 `{"code":"ambiguous_symbol","candidates":["alpha-coin","beta-coin"]}`.
 Retry with one of the returned IDs. C# callers receive the choices in `Crypto.CandidateIds`.
+Invalid input returns HTTP 400. An unknown coin returns HTTP 404 with
+`unknown_coin`. If CoinGecko fails and usable data is unavailable, both routes
+return HTTP 502 with `provider_unavailable` and a generic message.
 
 The `currency` query parameter defaults to `usd`. For example,
 `GET /api/coin?ticker=btc` returns USD values, while adding

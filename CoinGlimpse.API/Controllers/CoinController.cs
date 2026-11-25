@@ -1,11 +1,11 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using CoinGlimpse.External.Crypto;
+using CoinGlimpse.DataObjects;
+using Microsoft.AspNetCore.Http;
 
 namespace CoinGlimpse.Controllers
 {
@@ -39,27 +39,39 @@ namespace CoinGlimpse.Controllers
             if (data.CandidateIds != null)
                 return Conflict(new { code = "ambiguous_symbol", candidates = data.CandidateIds });
 
-            if(data.msg != null){
-                return BadRequest(data.msg);
-            }
-            else 
-                return Ok(data);
+            return data.LookupError switch
+            {
+                CoinLookupError.UnknownCoin => NotFound(new { code = "unknown_coin", message = data.msg }),
+                CoinLookupError.ProviderUnavailable => ProviderUnavailable(),
+                _ => data.msg != null ? BadRequest(data.msg) : Ok(data)
+            };
         }
 
         [HttpGet]
         [Route("list")]
         public async Task<IActionResult> Get()
         {
+            var cancellationToken = ControllerContext.HttpContext?.RequestAborted ?? CancellationToken.None;
             try
             {
-                return await Task.FromResult(
-                    Ok(await _cryptoManager.FetchList(
-                        ControllerContext.HttpContext?.RequestAborted ?? CancellationToken.None)));
+                return Ok(await _cryptoManager.FetchList(cancellationToken));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                return await Task.FromResult(StatusCode(500, ex.Message));
+                _logger.LogError("Coin catalog could not be loaded. ErrorType={ErrorType}", ex.GetType().Name);
+                return ProviderUnavailable();
             }
         }
+
+        private ObjectResult ProviderUnavailable() =>
+            StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                code = "provider_unavailable",
+                message = "CoinGecko data is temporarily unavailable."
+            });
     }
 }

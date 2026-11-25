@@ -152,6 +152,7 @@ namespace CoinGlimpse.External.Crypto
                 {
                     return new DataObjects.Crypto
                     {
+                        LookupError = CoinLookupError.UnknownCoin,
                         msg = $"\"{ticker}\" is not a valid coin id or ticker."
                     };
                 }
@@ -185,6 +186,7 @@ namespace CoinGlimpse.External.Crypto
                     ex.GetType().Name);
                 return new DataObjects.Crypto
                 {
+                    LookupError = CoinLookupError.ProviderUnavailable,
                     msg = "Unable to communicate with the CoinGecko API."
                 };
             }
@@ -197,6 +199,7 @@ namespace CoinGlimpse.External.Crypto
                     ex.GetType().Name);
                 return new DataObjects.Crypto
                 {
+                    LookupError = CoinLookupError.ProviderUnavailable,
                     msg = "CoinGecko returned an invalid response."
                 };
             }
@@ -209,6 +212,7 @@ namespace CoinGlimpse.External.Crypto
                     ex.GetType().Name);
                 return new DataObjects.Crypto
                 {
+                    LookupError = CoinLookupError.ProviderUnavailable,
                     msg = "Unable to retrieve coin data."
                 };
             }

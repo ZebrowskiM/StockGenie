@@ -23,13 +23,7 @@ public class CoinLookupRouteTests
         var canonicalId = new string('a', 100);
         using var handler = new FixtureHandler(canonicalId);
         using var upstream = new HttpClient(handler);
-        var builder = WebApplication.CreateBuilder();
-        builder.WebHost.UseUrls("http://127.0.0.1:0");
-        builder.Services.AddControllers().AddApplicationPart(typeof(CoinController).Assembly);
-        builder.Services.AddSingleton<ICryptoManager>(new CryptoManager(upstream,
-            NullLogger<CryptoManager>.Instance, Options.Create(new CoinGeckoOptions { ApiKey = "fixture" })));
-        await using var app = builder.Build();
-        app.MapControllers();
+        await using var app = CreateApp(upstream);
         await app.StartAsync();
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
 
@@ -51,8 +45,63 @@ public class CoinLookupRouteTests
         Assert.AreEqual(2, handler.Requests);
     }
 
+    [TestMethod]
+    public async Task ProviderFailuresAreSanitizedAndUnknownCoinsReturnNotFound()
+    {
+        using var handler = new FixtureHandler("bitcoin") { FailCatalog = true };
+        using var upstream = new HttpClient(handler);
+        await using var app = CreateApp(upstream);
+        await app.StartAsync();
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+
+        await AssertProviderFailure("/api/coin/list");
+        await AssertProviderFailure("/api/coin?ticker=bitcoin");
+
+        // Restart the host with a good catalog to exercise the detail upstream.
+        using var detailHandler = new FixtureHandler("bitcoin") { FailDetail = true };
+        using var detailUpstream = new HttpClient(detailHandler);
+        await using var detailApp = CreateApp(detailUpstream);
+        await detailApp.StartAsync();
+        using var detailClient = new HttpClient { BaseAddress = new Uri(detailApp.Urls.Single()) };
+        using var unknown = await detailClient.GetAsync("/api/coin?ticker=unknown");
+        Assert.AreEqual(HttpStatusCode.NotFound, unknown.StatusCode);
+        using var unknownBody = JsonDocument.Parse(await unknown.Content.ReadAsStringAsync());
+        Assert.AreEqual("unknown_coin", unknownBody.RootElement.GetProperty("code").GetString());
+        using var failedDetail = await detailClient.GetAsync("/api/coin?ticker=bitcoin");
+        await CheckProviderFailure(failedDetail);
+
+        async Task AssertProviderFailure(string route)
+        {
+            using var response = await client.GetAsync(route);
+            await CheckProviderFailure(response);
+        }
+    }
+
+    private static async Task CheckProviderFailure(HttpResponseMessage response)
+    {
+        Assert.AreEqual(HttpStatusCode.BadGateway, response.StatusCode);
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.AreEqual("provider_unavailable", body.RootElement.GetProperty("code").GetString());
+        Assert.AreEqual("CoinGecko data is temporarily unavailable.",
+            body.RootElement.GetProperty("message").GetString());
+    }
+
+    private static WebApplication CreateApp(HttpClient upstream)
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Services.AddControllers().AddApplicationPart(typeof(CoinController).Assembly);
+        builder.Services.AddSingleton<ICryptoManager>(new CryptoManager(upstream,
+            NullLogger<CryptoManager>.Instance, Options.Create(new CoinGeckoOptions { ApiKey = "fixture", MaxRetryAttempts = 0 })));
+        var app = builder.Build();
+        app.MapControllers();
+        return app;
+    }
+
     private sealed class FixtureHandler(string canonicalId) : HttpMessageHandler
     {
+        public bool FailCatalog { get; set; }
+        public bool FailDetail { get; set; }
         public string DetailPath { get; private set; }
         public int Requests { get; private set; }
 
@@ -60,7 +109,13 @@ public class CoinLookupRouteTests
         {
             Requests++;
             string body;
-            if (request.RequestUri.AbsolutePath == "/api/v3/coins/list")
+            var isCatalog = request.RequestUri.AbsolutePath == "/api/v3/coins/list";
+            if ((isCatalog && FailCatalog) || (!isCatalog && FailDetail))
+            {
+                throw new HttpRequestException("Private upstream diagnostics");
+            }
+
+            if (isCatalog)
             {
                 body = JsonSerializer.Serialize(new[]
                 {
