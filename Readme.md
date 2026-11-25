@@ -57,14 +57,16 @@ Relevant settings and defaults in `CoinGlimpse.API\appsettings.json`:
 | `CoinGecko:BaseUrl` | `https://api.coingecko.com/api/v3/` | CoinGecko API base URL. |
 | `CoinGecko:Plan` | `Demo` | Selects Demo or Pro key header. |
 | `CoinGecko:ListCacheDuration` | `00:10:00` | Coin-list cache lifetime. |
+| `CoinGecko:ListMaxStaleDuration` | `00:30:00` | Additional time an expired catalog can be served after refresh failure. Zero disables fallback. |
+| `CoinGecko:ListRefreshBackoff` | `00:01:00` | Minimum time between a failed catalog refresh and the next attempt. |
 | `CoinGecko:MaxRetryAttempts` | `2` | Retries for rate-limit and server-error responses (capped at five). |
 | `CoinGecko:EnableRequestLogging` | `false` | Enables routine request lifecycle and cache diagnostics. |
 
-Coin details and prices are not cached; each coin lookup requests current
-CoinGecko market data. Only the coin list is cached, using the configured
-`ListCacheDuration`; the list cache is per `CryptoManager` instance and does not
-persist across separate API requests with the current typed `HttpClient`
-registration.
+Coin detail requests fetch current market data. The host shares the catalog across
+requests and refreshes it on demand after its lifetime expires. If a refresh
+fails or returns an empty list, callers can use the previous catalog during
+the configured stale window. Once that window ends, callers receive the error.
+The next request after the backoff can retry, including after a failed first load.
 
 Only HTTPS base URLs are accepted, except loopback URLs for local development.
 The client uses a 30-second timeout, disables automatic redirects, and observes
@@ -76,13 +78,13 @@ capped at 30 seconds. Responses larger than 10 MB are rejected.
 The wrapper uses the application-provided `ILogger`. Set
 `CoinGecko:EnableRequestLogging` to `true` to log request starts/completions,
 HTTP method, endpoint template, attempt/status, elapsed time, response content
-length, list-cache hits, and list refresh counts/cache duration. It defaults to
+length, and the number of coins loaded on refresh. It defaults to
 `false`; with it disabled, routine request logs and timing measurements are
 skipped. Warnings and errors (including retry details) are still logged.
 
 The wrapper does not log API keys, full request URLs/query strings, or response
 bodies. `Logging:LogLevel` continues to control the emitted levels; for example,
-request lifecycle details are logged at Information and cache hits at Debug.
+request lifecycle details are logged at Information.
 
 ## Performance benchmarks
 
