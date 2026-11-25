@@ -16,6 +16,9 @@
 /CoinGlimpse.Tests/obj/
 /CoinGlimpse.Tests/bin/
 /CoinGlimpse.Tests/TestResults/
+/CoinGlimpse.Benchmarks/bin/
+/CoinGlimpse.Benchmarks/obj/
+/BenchmarkDotNet.Artifacts/
 /.vs/CoinGlimpse/DesignTimeBuild
 /.vs/CoinGlimpse/v17
 /.vs

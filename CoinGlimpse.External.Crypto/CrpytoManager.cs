@@ -1,56 +1,121 @@
-using System.Runtime.InteropServices;
-using System.Linq;
 using System;
-using CoinGecko.Clients;
-using CoinGecko.Interfaces;
-using CoinGlimpse.DataObjects;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
+using CoinGlimpse.DataObjects;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace CoinGlimpse.External.Crypto
 {
     public class CryptoManager : ICryptoManager
     {
-        private readonly ICoinGeckoClient _client;
+        private const long MaxResponseSize = 10 * 1024 * 1024;
+        private static readonly Random Jitter = new Random();
 
-        public CryptoManager(){
-            _client = CoinGeckoClient.Instance;
+        private readonly HttpClient _httpClient;
+        private readonly ILogger<CryptoManager> _logger;
+        private readonly CoinGeckoOptions _options;
+        private readonly SemaphoreSlim _listLock = new SemaphoreSlim(1, 1);
+        private readonly ConcurrentDictionary<string, CacheEntry<List<CryptoListitem>>> _listCache =
+            new ConcurrentDictionary<string, CacheEntry<List<CryptoListitem>>>(StringComparer.Ordinal);
+
+        public CryptoManager(
+            HttpClient httpClient,
+            ILogger<CryptoManager> logger,
+            IOptions<CoinGeckoOptions> options)
+        {
+            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+
+            ValidateBaseUrl();
+            ConfigureHttpClient();
         }
 
-        public CryptoManager(string apiKey)
+        public async Task<List<CryptoListitem>> FetchList(
+            CancellationToken cancellationToken = default)
         {
-            _client = string.IsNullOrWhiteSpace(apiKey)
-                ? CoinGeckoClient.Instance
-                : new CoinGeckoClient(new CoinGeckoApiKeyHandler(apiKey));
-        }
-
-        public async Task<List<CryptoListitem>> FetchList()
-        {
-            var list = new List<CryptoListitem>();
-
-            var coins = await _client.CoinsClient.GetCoinList().ConfigureAwait(false);
-
-            if (coins == null || !coins.Any())
+            var cacheKey = "coin-list";
+            if (_listCache.TryGetValue(cacheKey, out var cacheEntry) &&
+                cacheEntry.ExpiresAtUtc > DateTimeOffset.UtcNow)
             {
-                throw new Exception("Error communicating to Coin API");
-            }
-            foreach (var item in coins)
-            {
-                list.Add(new CryptoListitem
+                if (_options.EnableRequestLogging && _logger.IsEnabled(LogLevel.Debug))
                 {
-                    id = item.Id,
-                    name = item.Name,
-                    ticker = item.Symbol
-                }) ;
+                    _logger.LogDebug("Coin list returned from cache");
+                }
+
+                return Copy(cacheEntry.Value);
             }
 
-            return list;
-        }
-   
+            await _listLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (_listCache.TryGetValue(cacheKey, out cacheEntry) &&
+                    cacheEntry.ExpiresAtUtc > DateTimeOffset.UtcNow)
+                {
+                    return Copy(cacheEntry.Value);
+                }
 
-        public async Task<CoinGlimpse.DataObjects.Crypto> FetchCoin( string ticker)
+                using var response = await SendWithRetryAsync(
+                    "coins/list",
+                    "coins/list",
+                    cancellationToken).ConfigureAwait(false);
+
+                var coins = await ReadJsonAsync<List<CoinListItem>>(
+                    response,
+                    "coins/list",
+                    cancellationToken).ConfigureAwait(false);
+
+                var result = coins
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Id))
+                    .Select(x => new CryptoListitem
+                    {
+                        id = x.Id,
+                        name = x.Name,
+                        ticker = x.Symbol
+                    })
+                    .ToList();
+
+                if (result.Count == 0)
+                {
+                    throw new InvalidOperationException("CoinGecko returned an empty coin list.");
+                }
+
+                var duration = _options.ListCacheDuration > TimeSpan.Zero
+                    ? _options.ListCacheDuration
+                    : TimeSpan.FromMinutes(10);
+                _listCache[cacheKey] = new CacheEntry<List<CryptoListitem>>(
+                    result,
+                    DateTimeOffset.UtcNow.Add(duration));
+
+                if (_options.EnableRequestLogging && _logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation(
+                        "CoinGecko coin list loaded successfully. Count={Count} CacheDurationSeconds={CacheDurationSeconds}",
+                        result.Count,
+                        duration.TotalSeconds);
+                }
+
+                return Copy(result);
+            }
+            finally
+            {
+                _listLock.Release();
+            }
+        }
+
+        public async Task<DataObjects.Crypto> FetchCoin(
+            string ticker,
+            CancellationToken cancellationToken = default)
         {
             var input = ticker?.Trim();
             if (string.IsNullOrEmpty(input))
@@ -58,102 +123,441 @@ namespace CoinGlimpse.External.Crypto
                 return new DataObjects.Crypto { msg = "Enter a coin ID or ticker." };
             }
 
+            if (input.Length > 100)
+            {
+                return new DataObjects.Crypto
+                {
+                    msg = "Coin ID or ticker is too long."
+                };
+            }
+
             try
             {
-                var coins = await _client.CoinsClient.GetCoinList().ConfigureAwait(false);
-                if (coins == null || !coins.Any())
-                {
-                    return new DataObjects.Crypto{
-                        msg = "Error communicating to Coin API"
-                    };
-                }
-
+                var coins = await FetchList(cancellationToken).ConfigureAwait(false);
                 var result = coins.FirstOrDefault(
-                    x => string.Equals(x.Symbol, input, StringComparison.OrdinalIgnoreCase))
+                    x => string.Equals(x.ticker, input, StringComparison.OrdinalIgnoreCase))
                     ?? coins.FirstOrDefault(
-                        x => string.Equals(x.Id, input, StringComparison.OrdinalIgnoreCase));
+                        x => string.Equals(x.id, input, StringComparison.OrdinalIgnoreCase));
 
-                if(result is null)
+                if (result is null)
                 {
-                    return new DataObjects.Crypto{
-                    msg = $" \"{ticker}\" is not a valid coin id or ticker, please try a differenct value "
+                    return new DataObjects.Crypto
+                    {
+                        msg = $"\"{ticker}\" is not a valid coin id or ticker."
                     };
                 }
 
-                return ConvertFromGecko(result);
+                var escapedId = Uri.EscapeDataString(result.id);
+                var relativeUrl =
+                    $"coins/{escapedId}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false";
+
+                using var response = await SendWithRetryAsync(
+                    "coins/{id}",
+                    relativeUrl,
+                    cancellationToken).ConfigureAwait(false);
+
+                var coinData = await ReadJsonAsync<CoinFullDataById>(
+                    response,
+                    "coins/{id}",
+                    cancellationToken).ConfigureAwait(false);
+
+                return Convert(coinData);
             }
-            catch(Exception ex)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                return new DataObjects.Crypto{
-                    msg = $"Err : {ex.Message} " 
-                };
-            }
-            
-        }
-
-        private CoinGlimpse.DataObjects.Crypto ConvertFromGecko(CoinGecko.Entities.Response.Coins.CoinList geckoCoin)
-        {
-            var coin = new CoinGlimpse.DataObjects.Crypto(); 
-            CoinGecko.Entities.Response.Coins.CoinFullDataById coinData = null;
-            try{  
-                 coinData = GetCoinData(geckoCoin.Id);
-            }
-            catch(Exception ex){
-                if(ex.InnerException.ToString().Contains("Response status code does not indicate success: 404 (Not Found)"))
-                {
-                    return new DataObjects.Crypto(){
-                        msg = "Could Not Get Coin Data for \"{geckoCoin.Id}\" because coin does not exist"
-                    };
-                }
-                else
                 throw;
             }
-            if(coinData == null){
-                return new DataObjects.Crypto{
-                    msg = $"Could Not Get Coin Data for \"{geckoCoin.Id}\" "
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "CoinGecko request failed. Endpoint={Endpoint} ErrorType={ErrorType}",
+                    "coins/{id}",
+                    ex.GetType().Name);
+                return new DataObjects.Crypto
+                {
+                    msg = "Unable to communicate with the CoinGecko API."
                 };
             }
-
-            return Convert(coinData);
-            
+            catch (JsonException ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "CoinGecko returned invalid JSON. Endpoint={Endpoint} ErrorType={ErrorType}",
+                    "coins/{id}",
+                    ex.GetType().Name);
+                return new DataObjects.Crypto
+                {
+                    msg = "CoinGecko returned an invalid response."
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex,
+                    "Unexpected error while fetching coin detail. Endpoint={Endpoint} ErrorType={ErrorType}",
+                    "coins/{id}",
+                    ex.GetType().Name);
+                return new DataObjects.Crypto
+                {
+                    msg = "Unable to retrieve coin data."
+                };
+            }
         }
 
-        private CoinGlimpse.DataObjects.Crypto Convert(CoinGecko.Entities.Response.Coins.CoinFullDataById coinData){
- 
-            return new DataObjects.Crypto{
-                Price = double.Parse(coinData.MarketData.CurrentPrice["usd"].ToString()),
-                MarketCap = long.Parse(Math.Round(decimal.Parse(coinData.MarketData.MarketCap["usd"].ToString())).ToString()),
-                ExchangeInfo = string.Join(",",coinData.Platforms.ToList()),
-                
+        private async Task<HttpResponseMessage> SendWithRetryAsync(
+            string endpoint,
+            string relativeUrl,
+            CancellationToken cancellationToken)
+        {
+            var retryAttempts = Math.Clamp(_options.MaxRetryAttempts, 0, 5);
 
+            for (var attempt = 0; ; attempt++)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Get, relativeUrl);
+                request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+                if (!string.IsNullOrWhiteSpace(_options.ApiKey))
+                {
+                    var headerName = _options.Plan == CoinGeckoPlan.Pro
+                        ? "x-cg-pro-api-key"
+                        : "x-cg-demo-api-key";
+                    request.Headers.TryAddWithoutValidation(headerName, _options.ApiKey);
+                }
+
+                var requestLoggingEnabled = _options.EnableRequestLogging;
+                var requestStartedAt = requestLoggingEnabled
+                    ? System.Diagnostics.Stopwatch.GetTimestamp()
+                    : 0;
+                if (requestLoggingEnabled && _logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation(
+                        "CoinGecko request started. Method={Method} Endpoint={Endpoint} Attempt={Attempt}",
+                        request.Method,
+                        endpoint,
+                        attempt + 1);
+                }
+
+                HttpResponseMessage response;
+                try
+                {
+                    response = await _httpClient.SendAsync(
+                        request,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (HttpRequestException ex)
+                {
+                    if (attempt >= retryAttempts)
+                    {
+                        if (requestLoggingEnabled)
+                        {
+                            _logger.LogError(
+                                ex,
+                                "CoinGecko request failed. Endpoint={Endpoint} Status=TransportError ElapsedMs={ElapsedMs}",
+                                endpoint,
+                                System.Diagnostics.Stopwatch.GetElapsedTime(requestStartedAt).TotalMilliseconds);
+                        }
+                        else
+                        {
+                            _logger.LogError(
+                                ex,
+                                "CoinGecko request failed. Endpoint={Endpoint} Status=TransportError",
+                                endpoint);
+                        }
+
+                        throw;
+                    }
+
+                    await DelayBeforeRetryAsync(
+                            attempt,
+                            endpoint,
+                            null,
+                            cancellationToken,
+                            null,
+                            "TransportError")
+                        .ConfigureAwait(false);
+                    continue;
+                }
+
+                var statusCode = (int)response.StatusCode;
+
+                if (response.IsSuccessStatusCode)
+                {
+                    if (requestLoggingEnabled && _logger.IsEnabled(LogLevel.Information))
+                    {
+                        _logger.LogInformation(
+                            "CoinGecko request completed. Endpoint={Endpoint} Status={StatusCode} ElapsedMs={ElapsedMs} ContentLengthBytes={ContentLengthBytes}",
+                            endpoint,
+                            statusCode,
+                            System.Diagnostics.Stopwatch.GetElapsedTime(requestStartedAt).TotalMilliseconds,
+                            response.Content.Headers.ContentLength);
+                    }
+
+                    return response;
+                }
+
+                if (response.StatusCode == HttpStatusCode.NotFound)
+                {
+                    if (requestLoggingEnabled)
+                    {
+                        _logger.LogWarning(
+                            "CoinGecko resource was not found. Endpoint={Endpoint} Status={StatusCode} ElapsedMs={ElapsedMs}",
+                            endpoint,
+                            statusCode,
+                            System.Diagnostics.Stopwatch.GetElapsedTime(requestStartedAt).TotalMilliseconds);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "CoinGecko resource was not found. Endpoint={Endpoint} Status={StatusCode}",
+                            endpoint,
+                            statusCode);
+                    }
+
+                    response.Dispose();
+                    throw new CoinGeckoApiException(statusCode, "The requested CoinGecko resource was not found.");
+                }
+
+                var retryable =
+                    response.StatusCode == (HttpStatusCode)429 ||
+                    statusCode >= 500;
+
+                if (retryable && attempt < retryAttempts)
+                {
+                    var retryAfter = response.Headers.RetryAfter?.Delta;
+                    response.Dispose();
+                    await DelayBeforeRetryAsync(
+                        attempt,
+                        endpoint,
+                        retryAfter,
+                        cancellationToken,
+                        statusCode,
+                        "RetryableHttpStatus").ConfigureAwait(false);
+                    continue;
+                }
+
+                if (requestLoggingEnabled)
+                {
+                    _logger.LogWarning(
+                        "CoinGecko request returned an error. Endpoint={Endpoint} Status={StatusCode} ElapsedMs={ElapsedMs}",
+                        endpoint,
+                        statusCode,
+                        System.Diagnostics.Stopwatch.GetElapsedTime(requestStartedAt).TotalMilliseconds);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "CoinGecko request returned an error. Endpoint={Endpoint} Status={StatusCode}",
+                        endpoint,
+                        statusCode);
+                }
+
+                response.Dispose();
+                throw new CoinGeckoApiException(statusCode, "CoinGecko rejected the request.");
+            }
+        }
+
+        private async Task DelayBeforeRetryAsync(
+            int attempt,
+            string endpoint,
+            TimeSpan? retryAfter,
+            CancellationToken cancellationToken,
+            int? statusCode,
+            string reason)
+        {
+            var delay = retryAfter.HasValue
+                ? retryAfter.Value
+                : TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt));
+
+            if (delay > TimeSpan.FromSeconds(30))
+            {
+                delay = TimeSpan.FromSeconds(30);
+            }
+
+            delay += TimeSpan.FromMilliseconds(Jitter.Next(0, 100));
+
+            _logger.LogWarning(
+                "Retrying CoinGecko request. Endpoint={Endpoint} Attempt={Attempt} Status={StatusCode} Reason={Reason} DelayMs={DelayMs}",
+                endpoint,
+                attempt + 2,
+                statusCode,
+                reason,
+                (int)delay.TotalMilliseconds);
+
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<T> ReadJsonAsync<T>(
+            HttpResponseMessage response,
+            string endpoint,
+            CancellationToken cancellationToken)
+        {
+            if (response.Content.Headers.ContentLength > MaxResponseSize)
+            {
+                _logger.LogError(
+                    "CoinGecko response exceeded the configured size limit. Endpoint={Endpoint}",
+                    endpoint);
+                throw new InvalidOperationException("CoinGecko response was too large.");
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var options = new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+            var value = await JsonSerializer.DeserializeAsync<T>(
+                stream,
+                options,
+                cancellationToken).ConfigureAwait(false);
+
+            if (value is null)
+            {
+                throw new JsonException("CoinGecko returned a null JSON value.");
+            }
+
+            return value;
+        }
+
+        private void ValidateBaseUrl()
+        {
+            if (!Uri.TryCreate(_options.BaseUrl, UriKind.Absolute, out var baseUri))
+            {
+                throw new InvalidOperationException("CoinGecko BaseUrl is invalid.");
+            }
+
+            var loopback =
+                baseUri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                (IPAddress.TryParse(baseUri.Host, out var address) &&
+                 IPAddress.IsLoopback(address));
+
+            if (baseUri.Scheme != Uri.UriSchemeHttps && !loopback)
+            {
+                throw new InvalidOperationException(
+                    "CoinGecko BaseUrl must use HTTPS unless it is a loopback address.");
+            }
+        }
+
+        private void ConfigureHttpClient()
+        {
+            if (!Uri.TryCreate(_options.BaseUrl, UriKind.Absolute, out var baseUri))
+            {
+                throw new InvalidOperationException("CoinGecko BaseUrl is invalid.");
+            }
+
+            _httpClient.BaseAddress = baseUri;
+            _httpClient.Timeout = TimeSpan.FromSeconds(30);
+            _httpClient.DefaultRequestHeaders.Accept.Clear();
+            _httpClient.DefaultRequestHeaders.Accept.Add(
+                new MediaTypeWithQualityHeaderValue("application/json"));
+            _httpClient.DefaultRequestHeaders.UserAgent.Clear();
+            _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CoinGlimpse/1.0");
+        }
+
+        private static DataObjects.Crypto Convert(CoinFullDataById coinData)
+        {
+            decimal? price = null;
+            decimal? marketCap = null;
+            decimal? volume = null;
+
+            if (coinData.MarketData?.CurrentPrice?.TryGetValue("usd", out var currentPrice) == true)
+            {
+                price = currentPrice;
+            }
+
+            if (coinData.MarketData?.MarketCap?.TryGetValue("usd", out var currentMarketCap) == true)
+            {
+                marketCap = currentMarketCap;
+            }
+
+            if (coinData.MarketData?.TotalVolume?.TryGetValue("usd", out var currentVolume) == true)
+            {
+                volume = currentVolume;
+            }
+
+            var platformNames = coinData.Platforms == null
+                ? string.Empty
+                : string.Join(", ", coinData.Platforms.Keys);
+
+            return new DataObjects.Crypto
+            {
+                Price = (double)(price ?? 0),
+                MarketCap = (long)Math.Round(marketCap ?? 0, MidpointRounding.AwayFromZero),
+                Volume = (long)Math.Round(volume ?? 0, MidpointRounding.AwayFromZero),
+                ExchangeInfo = platformNames
             };
         }
-        
 
-        private CoinGecko.Entities.Response.Coins.CoinFullDataById GetCoinData(string id)
+        private static List<CryptoListitem> Copy(List<CryptoListitem> source)
         {
-        
-           var data =  _client.CoinsClient.GetAllCoinDataWithId(id);
-           data.ConfigureAwait(false);
-           return data.Result;
+            return source.Select(x => new CryptoListitem
+            {
+                id = x.id,
+                name = x.name,
+                ticker = x.ticker
+            }).ToList();
         }
 
-        private sealed class CoinGeckoApiKeyHandler : HttpClientHandler
+        private sealed class CacheEntry<T>
         {
-            private readonly string _apiKey;
-
-            public CoinGeckoApiKeyHandler(string apiKey)
+            public CacheEntry(T value, DateTimeOffset expiresAtUtc)
             {
-                _apiKey = apiKey;
+                Value = value;
+                ExpiresAtUtc = expiresAtUtc;
             }
 
-            protected override Task<HttpResponseMessage> SendAsync(
-                HttpRequestMessage request,
-                CancellationToken cancellationToken)
-            {
-                request.Headers.Add("x-cg-demo-api-key", _apiKey);
-                return base.SendAsync(request, cancellationToken);
-            }
+            public T Value { get; }
+            public DateTimeOffset ExpiresAtUtc { get; }
         }
+
+        private sealed class CoinListItem
+        {
+            [JsonPropertyName("id")]
+            public string Id { get; set; }
+
+            [JsonPropertyName("symbol")]
+            public string Symbol { get; set; }
+
+            [JsonPropertyName("name")]
+            public string Name { get; set; }
+        }
+
+        private sealed class CoinFullDataById
+        {
+            [JsonPropertyName("market_data")]
+            public CoinMarketData MarketData { get; set; }
+
+            [JsonPropertyName("platforms")]
+            public Dictionary<string, string> Platforms { get; set; }
+        }
+
+        private sealed class CoinMarketData
+        {
+            [JsonPropertyName("current_price")]
+            public Dictionary<string, decimal> CurrentPrice { get; set; }
+
+            [JsonPropertyName("market_cap")]
+            public Dictionary<string, decimal> MarketCap { get; set; }
+
+            [JsonPropertyName("total_volume")]
+            public Dictionary<string, decimal> TotalVolume { get; set; }
+        }
+    }
+
+    public sealed class CoinGeckoApiException : Exception
+    {
+        public CoinGeckoApiException(int statusCode, string message)
+            : base(message)
+        {
+            StatusCode = statusCode;
+        }
+
+        public int StatusCode { get; }
     }
 }
