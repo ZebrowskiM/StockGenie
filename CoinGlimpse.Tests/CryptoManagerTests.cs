@@ -4,6 +4,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using CoinGlimpse.External.Crypto;
@@ -72,10 +73,136 @@ public class CryptoManagerTests
         var result = await manager.FetchCoin("BTC");
 
         Assert.IsNull(result.msg);
-        Assert.AreEqual(50000.25, result.Price, 0.001);
+        Assert.AreEqual(50000.25m, result.Price);
+        Assert.AreEqual("USD", result.Currency);
         Assert.AreEqual(990000000000L, result.MarketCap);
         Assert.AreEqual(25000000000L, result.Volume);
         Assert.AreEqual("ethereum", result.ExchangeInfo);
+    }
+
+    [TestMethod]
+    public async Task FetchCoin_UsesRequestedCurrencyForAllMarketValues()
+    {
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            if (request.RequestUri.AbsolutePath.EndsWith("/coins/list",
+                StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "[{\"id\":\"bitcoin\",\"symbol\":\"btc\",\"name\":\"Bitcoin\"}]",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"market_data\":{\"current_price\":{\"usd\":50000.25,\"eur\":46000.5},\"market_cap\":{\"usd\":990000000000,\"eur\":910000000000},\"total_volume\":{\"usd\":25000000000,\"eur\":23000000000}},\"platforms\":{}}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+        var manager = CreateManager(handler, CoinGeckoPlan.Demo);
+
+        var result = await manager.FetchCoin("btc", "EUR");
+
+        Assert.IsNull(result.msg);
+        Assert.AreEqual("EUR", result.Currency);
+        Assert.AreEqual(46000.5m, result.Price);
+        Assert.AreEqual(910000000000L, result.MarketCap);
+        Assert.AreEqual(23000000000L, result.Volume);
+    }
+
+    [TestMethod]
+    public async Task FetchCoin_SerializesSmallPriceAsPlainDecimal()
+    {
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            if (request.RequestUri.AbsolutePath.EndsWith("/coins/list",
+                StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "[{\"id\":\"small-coin\",\"symbol\":\"sml\",\"name\":\"Small Coin\"}]",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"market_data\":{\"current_price\":{\"usd\":0.00001001}},\"platforms\":{}}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+        var manager = CreateManager(handler, CoinGeckoPlan.Demo);
+
+        var result = await manager.FetchCoin("sml");
+        var json = JsonSerializer.Serialize(
+            result,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+
+        Assert.AreEqual(0.00001001m, result.Price);
+        StringAssert.Contains(json, "\"price\":0.00001001");
+        Assert.IsFalse(json.Contains("E-"));
+    }
+
+    [TestMethod]
+    public async Task FetchCoin_ReturnsErrorWhenCurrencyIsUnavailable()
+    {
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            if (request.RequestUri.AbsolutePath.EndsWith("/coins/list",
+                StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        "[{\"id\":\"bitcoin\",\"symbol\":\"btc\",\"name\":\"Bitcoin\"}]",
+                        Encoding.UTF8,
+                        "application/json")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    "{\"market_data\":{\"current_price\":{\"usd\":50000.25}},\"platforms\":{}}",
+                    Encoding.UTF8,
+                    "application/json")
+            };
+        });
+        var manager = CreateManager(handler, CoinGeckoPlan.Demo);
+
+        var result = await manager.FetchCoin("btc", "eur");
+
+        Assert.AreEqual("Price data is unavailable for currency 'EUR'.", result.msg);
+    }
+
+    [TestMethod]
+    public async Task FetchCoin_RejectsMalformedCurrencyCode()
+    {
+        var requestCount = 0;
+        var handler = new StubHttpMessageHandler(_ =>
+        {
+            requestCount++;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("[]", Encoding.UTF8, "application/json")
+            };
+        });
+        var manager = CreateManager(handler, CoinGeckoPlan.Demo);
+
+        var result = await manager.FetchCoin("btc", "usd&apiKey=secret");
+
+        Assert.AreEqual("Enter a valid currency code.", result.msg);
+        Assert.AreEqual(0, requestCount);
     }
 
     [TestMethod]

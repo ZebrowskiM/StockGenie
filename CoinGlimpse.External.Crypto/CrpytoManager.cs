@@ -113,8 +113,16 @@ namespace CoinGlimpse.External.Crypto
             }
         }
 
+        public Task<DataObjects.Crypto> FetchCoin(
+            string ticker,
+            CancellationToken cancellationToken = default)
+        {
+            return FetchCoin(ticker, "usd", cancellationToken);
+        }
+
         public async Task<DataObjects.Crypto> FetchCoin(
             string ticker,
+            string currency,
             CancellationToken cancellationToken = default)
         {
             var input = ticker?.Trim();
@@ -128,6 +136,21 @@ namespace CoinGlimpse.External.Crypto
                 return new DataObjects.Crypto
                 {
                     msg = "Coin ID or ticker is too long."
+                };
+            }
+
+            var requestedCurrency = string.IsNullOrWhiteSpace(currency)
+                ? "usd"
+                : currency.Trim().ToLowerInvariant();
+            if (requestedCurrency.Length < 2 ||
+                requestedCurrency.Length > 10 ||
+                requestedCurrency.Any(character =>
+                    (character < 'a' || character > 'z') &&
+                    (character < '0' || character > '9')))
+            {
+                return new DataObjects.Crypto
+                {
+                    msg = "Enter a valid currency code."
                 };
             }
 
@@ -161,7 +184,7 @@ namespace CoinGlimpse.External.Crypto
                     "coins/{id}",
                     cancellationToken).ConfigureAwait(false);
 
-                return Convert(coinData);
+                return Convert(coinData, requestedCurrency);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -460,23 +483,27 @@ namespace CoinGlimpse.External.Crypto
             _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("CoinGlimpse/1.0");
         }
 
-        private static DataObjects.Crypto Convert(CoinFullDataById coinData)
+        private static DataObjects.Crypto Convert(
+            CoinFullDataById coinData,
+            string currency)
         {
-            decimal? price = null;
             decimal? marketCap = null;
             decimal? volume = null;
 
-            if (coinData.MarketData?.CurrentPrice?.TryGetValue("usd", out var currentPrice) == true)
+            if (coinData.MarketData?.CurrentPrice?.TryGetValue(currency, out var currentPrice) != true)
             {
-                price = currentPrice;
+                return new DataObjects.Crypto
+                {
+                    msg = $"Price data is unavailable for currency '{currency.ToUpperInvariant()}'."
+                };
             }
 
-            if (coinData.MarketData?.MarketCap?.TryGetValue("usd", out var currentMarketCap) == true)
+            if (coinData.MarketData?.MarketCap?.TryGetValue(currency, out var currentMarketCap) == true)
             {
                 marketCap = currentMarketCap;
             }
 
-            if (coinData.MarketData?.TotalVolume?.TryGetValue("usd", out var currentVolume) == true)
+            if (coinData.MarketData?.TotalVolume?.TryGetValue(currency, out var currentVolume) == true)
             {
                 volume = currentVolume;
             }
@@ -487,7 +514,8 @@ namespace CoinGlimpse.External.Crypto
 
             return new DataObjects.Crypto
             {
-                Price = (double)(price ?? 0),
+                Price = currentPrice,
+                Currency = currency.ToUpperInvariant(),
                 MarketCap = (long)Math.Round(marketCap ?? 0, MidpointRounding.AwayFromZero),
                 Volume = (long)Math.Round(volume ?? 0, MidpointRounding.AwayFromZero),
                 ExchangeInfo = platformNames

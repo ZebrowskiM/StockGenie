@@ -5,7 +5,7 @@ namespace CoinGlimpse.Interfaces.DataObjects
 
 public interface ISecurity
 {
-    Double Price {get;set;}
+    Decimal Price {get;set;}
     Double YrHigh {get;set;}
     Double YrLow {get;set;}
     Double YrAverage {get;set;}
