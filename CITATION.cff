@@ -2,8 +2,18 @@ cff-version: 1.2.0
 message: "If you reference this software in your work, please cite it using the metadata below."
 title: CoinGlimpse
 type: software
+abstract: >-
+  CoinGlimpse is an ASP.NET Core API for retrieving supported cryptocurrency
+  coins and their current USD market data from CoinGecko. It provides coin-list
+  and coin-detail endpoints through a custom HTTP client integration.
 authors:
   - family-names: Zebrowski
     given-names: Marek
+keywords:
+  - cryptocurrency
+  - CoinGecko
+  - ASP.NET Core
+  - market data
 repository-code: https://github.com/ZebrowskiM/StockGenie
+url: https://github.com/ZebrowskiM/StockGenie
 license: Apache-2.0
