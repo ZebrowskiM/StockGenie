@@ -29,6 +29,9 @@ namespace CoinGlimpse.DataObjects
         public string ExchangeInfo { get; set; }
         public long MarketCap { get; set; }
         public long Volume { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string[] CandidateIds { get; set; }
+
         public string msg {get;set;}
     }
 }

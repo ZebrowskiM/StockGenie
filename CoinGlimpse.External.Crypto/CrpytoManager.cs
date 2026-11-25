@@ -127,9 +127,26 @@ namespace CoinGlimpse.External.Crypto
             {
                 var coins = await FetchList(cancellationToken).ConfigureAwait(false);
                 var result = coins.FirstOrDefault(
-                    x => string.Equals(x.ticker, input, StringComparison.OrdinalIgnoreCase))
-                    ?? coins.FirstOrDefault(
-                        x => string.Equals(x.id, input, StringComparison.OrdinalIgnoreCase));
+                    x => string.Equals(x.id, input, StringComparison.OrdinalIgnoreCase));
+                if (result is null)
+                {
+                    var matches = coins
+                        .Where(x => string.Equals(x.ticker, input, StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(x => x.id, StringComparer.Ordinal)
+                        .DistinctBy(x => x.id, StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+
+                    if (matches.Length > 1)
+                    {
+                        return new DataObjects.Crypto
+                        {
+                            msg = "Multiple coins use this ticker. Select a coin ID.",
+                            CandidateIds = matches.Select(x => x.id).ToArray()
+                        };
+                    }
+
+                    result = matches.FirstOrDefault();
+                }
 
                 if (result is null)
                 {

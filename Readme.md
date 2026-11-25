@@ -11,6 +11,12 @@ wrapper rather than a third-party CoinGecko SDK.
 | `GET /api/coin/list` | `/coins/list` | Returns supported coin IDs, names, and symbols. |
 | `GET /api/coin?ticker=btc&currency=eur` | `/coins/{id}` | Looks up a ticker or CoinGecko ID and returns price, market cap, and volume in the selected currency. |
 
+The `ticker` input accepts a coin ID or symbol up to 100 characters after trimming.
+Matching ignores case and gives a canonical ID priority over a symbol.
+If several IDs share a symbol, the route returns HTTP 409 with a body such as
+`{"code":"ambiguous_symbol","candidates":["alpha-coin","beta-coin"]}`.
+Retry with one of the returned IDs. C# callers receive the choices in `Crypto.CandidateIds`.
+
 The `currency` query parameter defaults to `usd`. For example,
 `GET /api/coin?ticker=btc` returns USD values, while adding
 `&currency=eur` requests EUR values. The response includes a `Currency` field
