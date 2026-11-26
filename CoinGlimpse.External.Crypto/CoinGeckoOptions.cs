@@ -12,6 +12,8 @@ namespace CoinGlimpse.External.Crypto
         public TimeSpan ListCacheDuration { get; set; } = TimeSpan.FromMinutes(10);
         public TimeSpan ListMaxStaleDuration { get; set; } = TimeSpan.FromMinutes(30);
         public TimeSpan ListRefreshBackoff { get; set; } = TimeSpan.FromMinutes(1);
+        public TimeSpan QuoteCacheDuration { get; set; } = TimeSpan.FromSeconds(60);
+        public int QuoteCacheCapacity { get; set; } = 128;
         public int MaxRetryAttempts { get; set; } = 2;
         public bool EnableRequestLogging { get; set; }
     }

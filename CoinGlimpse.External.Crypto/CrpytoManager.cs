@@ -29,13 +29,15 @@ namespace CoinGlimpse.External.Crypto
             HttpClient httpClient,
             ILogger<CryptoManager> logger,
             IOptions<CoinGeckoOptions> options,
-            CoinCatalogCache catalog = null)
+            CoinCatalogCache catalog = null,
+            CoinQuoteCache quoteCache = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
 
             _catalog = catalog ?? new CoinCatalogCache(TimeProvider.System);
+            _quoteCache = quoteCache ?? new CoinQuoteCache(TimeProvider.System);
             ValidateBaseUrl();
             ConfigureHttpClient();
         }
@@ -222,8 +224,10 @@ namespace CoinGlimpse.External.Crypto
         private async Task<HttpResponseMessage> SendWithRetryAsync(
             string endpoint,
             string relativeUrl,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            (CoinGeckoPlan Plan, string ApiKey)? credentials = null)
         {
+            var (plan, apiKey) = credentials ?? (_options.Plan, _options.ApiKey);
             var retryAttempts = Math.Clamp(_options.MaxRetryAttempts, 0, 5);
 
             for (var attempt = 0; ; attempt++)
@@ -231,12 +235,12 @@ namespace CoinGlimpse.External.Crypto
                 using var request = new HttpRequestMessage(HttpMethod.Get, relativeUrl);
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                if (!string.IsNullOrWhiteSpace(_options.ApiKey))
+                if (!string.IsNullOrWhiteSpace(apiKey))
                 {
-                    var headerName = _options.Plan == CoinGeckoPlan.Pro
+                    var headerName = plan == CoinGeckoPlan.Pro
                         ? "x-cg-pro-api-key"
                         : "x-cg-demo-api-key";
-                    request.Headers.TryAddWithoutValidation(headerName, _options.ApiKey);
+                    request.Headers.TryAddWithoutValidation(headerName, apiKey);
                 }
 
                 var requestLoggingEnabled = _options.EnableRequestLogging;

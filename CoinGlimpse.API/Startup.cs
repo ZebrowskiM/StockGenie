@@ -34,6 +34,7 @@ namespace CoinGlimpse
                 Configuration.GetSection(CoinGeckoOptions.SectionName));
             services.AddSingleton(TimeProvider.System);
             services.AddSingleton<CoinCatalogCache>();
+            services.AddSingleton<CoinQuoteCache>();
             services.AddHttpClient<ICryptoManager, CryptoManager>()
                 .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
                 {

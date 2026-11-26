@@ -87,6 +87,16 @@ The client uses a 30-second timeout, disables automatic redirects, and observes
 request cancellation. Retry delays honor `Retry-After` when supplied and are
 capped at 30 seconds. Responses larger than 10 MB are rejected.
 
+## Watchlist quote cache
+
+`CryptoManager.GetQuotesAsync` caches equivalent ID sets per currency, CoinGecko
+base URL, plan, and key. The ASP.NET Core host shares the cache across requests.
+Directly constructed managers use their own cache unless given a shared one.
+`CoinGecko:QuoteCacheDuration` defaults to `00:01:00` and
+`CoinGecko:QuoteCacheCapacity` defaults to 128 batches. Set either to zero to
+disable caching. Reads refresh on demand after expiry and keep the original
+retrieval timestamp on cache hits.
+
 ## Logging
 
 The wrapper uses the application-provided `ILogger`. Set

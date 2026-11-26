@@ -357,6 +357,81 @@ public class CryptoManagerTests
             manager.GetQuotesAsync(Enumerable.Repeat("bitcoin", CryptoManager.MaxQuoteIds + 1)));
     }
 
+    [TestMethod]
+    public async Task GetQuotesAsync_SharesEquivalentReadsAndExpiresAtConfiguredDuration()
+    {
+        var clock = new QuoteClock();
+        var cache = new CoinQuoteCache(clock);
+        var calls = 0;
+        using var handler = new StubHttpMessageHandler(request =>
+        {
+            calls++;
+            var json = request.RequestUri.Query.Contains("vs_currencies=eur")
+                ? """{"bitcoin":{"eur":2}}""" : """{"bitcoin":{"usd":1}}""";
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json) };
+        });
+        var options = new CoinGeckoOptions { ApiKey = "fixture", QuoteCacheDuration = TimeSpan.FromSeconds(10) };
+        CryptoManager Manager() => new(new HttpClient(handler, disposeHandler: false),
+            NullLogger<CryptoManager>.Instance, Options.Create(options), quoteCache: cache);
+
+        var first = await Manager().GetQuotesAsync(new[] { "ethereum", " BITCOIN " });
+        clock.Now += TimeSpan.FromSeconds(9);
+        var repeat = await Manager().GetQuotesAsync(new[] { "bitcoin", "ethereum", "bitcoin" }, " USD ");
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual(first.RetrievedAt, repeat.RetrievedAt);
+        var euros = await Manager().GetQuotesAsync(new[] { "bitcoin", "ethereum" }, "eur");
+        Assert.AreEqual(2m, euros.Quotes[0].Price);
+        Assert.AreEqual(2, calls);
+        clock.Now += TimeSpan.FromSeconds(1);
+        var refreshed = await Manager().GetQuotesAsync(new[] { "bitcoin", "ethereum" });
+        Assert.AreEqual(3, calls);
+        Assert.AreEqual(clock.Now, refreshed.RetrievedAt);
+    }
+
+    [TestMethod]
+    public async Task GetQuotesAsync_IsolatesCredentialsAndProvidersAndBoundsCapacity()
+    {
+        var cache = new CoinQuoteCache(TimeProvider.System);
+        var calls = 0;
+        using var handler = new StubHttpMessageHandler(_ =>
+        {
+            calls++;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"bitcoin":{"usd":1}}""")
+            };
+        });
+        using var firstClient = new HttpClient(handler, disposeHandler: false);
+        using var secondClient = new HttpClient(handler, disposeHandler: false);
+        using var thirdClient = new HttpClient(handler, disposeHandler: false);
+        CryptoManager Manager(HttpClient client, string apiKey, string baseUrl) =>
+            new(client, NullLogger<CryptoManager>.Instance, Options.Create(new CoinGeckoOptions
+            {
+                ApiKey = apiKey,
+                BaseUrl = baseUrl,
+                QuoteCacheCapacity = 1
+            }), quoteCache: cache);
+
+        const string baseUrl = "https://api.coingecko.com/api/v3/";
+        var first = Manager(firstClient, "first", baseUrl);
+        var second = Manager(secondClient, "second", baseUrl);
+        var third = Manager(thirdClient, "second", "https://example.com/api/v3/");
+        var ids = new[] { "bitcoin" };
+        await first.GetQuotesAsync(ids);
+        await second.GetQuotesAsync(ids);
+        await third.GetQuotesAsync(ids);
+        await third.GetQuotesAsync(ids);
+        Assert.AreEqual(3, calls);
+        await first.GetQuotesAsync(ids);
+        Assert.AreEqual(4, calls);
+    }
+
+    private sealed class QuoteClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UnixEpoch;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
     private static CryptoManager CreateManager(
         HttpMessageHandler handler,
         CoinGeckoPlan plan,
