@@ -40,7 +40,8 @@ namespace CoinGlimpse
                 {
                     AllowAutoRedirect = false,
                     PooledConnectionLifetime = TimeSpan.FromMinutes(5)
-                });
+                })
+                .AddTypedClient<CryptoManager>();
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "CoinGlimpse", Version = "v1" });

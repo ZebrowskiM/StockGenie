@@ -87,7 +87,17 @@ The client uses a 30-second timeout, disables automatic redirects, and observes
 request cancellation. Retry delays honor `Retry-After` when supplied and are
 capped at 30 seconds. Responses larger than 10 MB are rejected.
 
-## Watchlist quote cache
+## Watchlist quotes
+
+Call `GET /api/watchlist?ids=bitcoin,ethereum&currency=usd` with one to 50
+comma-separated CoinGecko IDs from `/api/coin/list`. Currency defaults to USD.
+The response contains `currency`, `retrievedAt`, and an array of `quotes` with
+`coinId`, `price`, and `providerUpdatedAt`. Missing prices and provider timestamps
+are returned as null, and cached responses retain their original retrieval time.
+Invalid input returns HTTP 400. Provider rate limits return HTTP 429 and other
+provider failures return HTTP 502.
+
+### Watchlist quote cache
 
 `CryptoManager.GetQuotesAsync` caches equivalent ID sets per currency, CoinGecko
 base URL, plan, and key. The ASP.NET Core host shares the cache across requests.
