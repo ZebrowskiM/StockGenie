@@ -11,6 +11,15 @@ wrapper rather than a third-party CoinGecko SDK.
 | `GET /api/coin/list` | `/coins/list` | Returns supported coin IDs, names, and symbols. |
 | `GET /api/coin?ticker=btc&currency=eur` | `/coins/{id}` | Looks up a ticker or CoinGecko ID and returns price, market cap, and volume in the selected currency. |
 
+The `ticker` input accepts a coin ID or symbol up to 100 characters after trimming.
+Matching ignores case and gives a canonical ID priority over a symbol.
+If several IDs share a symbol, the route returns HTTP 409 with a body such as
+`{"code":"ambiguous_symbol","candidates":["alpha-coin","beta-coin"]}`.
+Retry with one of the returned IDs. C# callers receive the choices in `Crypto.CandidateIds`.
+Invalid input returns HTTP 400. An unknown coin returns HTTP 404 with
+`unknown_coin`. If CoinGecko fails and usable data is unavailable, both routes
+return HTTP 502 with `provider_unavailable` and a generic message.
+
 The `currency` query parameter defaults to `usd`. For example,
 `GET /api/coin?ticker=btc` returns USD values, while adding
 `&currency=eur` requests EUR values. The response includes a `Currency` field
@@ -57,14 +66,21 @@ Relevant settings and defaults in `CoinGlimpse.API\appsettings.json`:
 | `CoinGecko:BaseUrl` | `https://api.coingecko.com/api/v3/` | CoinGecko API base URL. |
 | `CoinGecko:Plan` | `Demo` | Selects Demo or Pro key header. |
 | `CoinGecko:ListCacheDuration` | `00:10:00` | Coin-list cache lifetime. |
+| `CoinGecko:ListMaxStaleDuration` | `00:30:00` | Additional time an expired catalog can be served after refresh failure. Zero disables fallback. |
+| `CoinGecko:ListRefreshBackoff` | `00:01:00` | Minimum time between a failed catalog refresh and the next attempt. |
 | `CoinGecko:MaxRetryAttempts` | `2` | Retries for rate-limit and server-error responses (capped at five). |
 | `CoinGecko:EnableRequestLogging` | `false` | Enables routine request lifecycle and cache diagnostics. |
 
-Coin details and prices are not cached; each coin lookup requests current
-CoinGecko market data. Only the coin list is cached, using the configured
-`ListCacheDuration`; the list cache is per `CryptoManager` instance and does not
-persist across separate API requests with the current typed `HttpClient`
-registration.
+Coin detail requests fetch current market data. The host shares the catalog across
+requests and refreshes it on demand after its lifetime expires. If a refresh
+fails or returns an empty list, callers can use the previous catalog during
+the configured stale window. Once that window ends, callers receive the error.
+The next request after the backoff can retry, including after a failed first load.
+
+Successful `GET /api/coin/list` responses include `CoinGlimpse-Catalog-Age-Seconds`
+with whole seconds since the last successful fetch and `CoinGlimpse-Catalog-Stale`
+with `true` when the catalog has passed its configured lifetime. The body is
+the array of coins. These headers describe the catalog.
 
 Only HTTPS base URLs are accepted, except loopback URLs for local development.
 The client uses a 30-second timeout, disables automatic redirects, and observes
@@ -76,13 +92,13 @@ capped at 30 seconds. Responses larger than 10 MB are rejected.
 The wrapper uses the application-provided `ILogger`. Set
 `CoinGecko:EnableRequestLogging` to `true` to log request starts/completions,
 HTTP method, endpoint template, attempt/status, elapsed time, response content
-length, list-cache hits, and list refresh counts/cache duration. It defaults to
+length, and the number of coins loaded on refresh. It defaults to
 `false`; with it disabled, routine request logs and timing measurements are
 skipped. Warnings and errors (including retry details) are still logged.
 
 The wrapper does not log API keys, full request URLs/query strings, or response
 bodies. `Logging:LogLevel` continues to control the emitted levels; for example,
-request lifecycle details are logged at Information and cache hits at Debug.
+request lifecycle details are logged at Information.
 
 ## Performance benchmarks
 
@@ -113,7 +129,7 @@ dependencies and CoinGecko data are not covered by this grant and remain
 subject to their own terms.
 
 If you reference this project in a paper, post, or other work, please cite
-[Marek Zebrowski's CoinGlimpse](https://github.com/ZebrowskiM/StockGenie).
+[Marek Zebrowski's CoinGlimpse](https://github.com/ZebrowskiM/CoinGlimpse).
 GitHub's **Cite this repository** button uses the metadata in
 [CITATION.cff](CITATION.cff). If reproducibility matters, include the commit
 you used.

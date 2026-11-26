@@ -88,7 +88,7 @@ public class CoinControllerTests
     }
 
     [TestMethod]
-    public async Task GetList_ReturnsInternalServerError_WhenManagerThrows()
+    public async Task GetList_ReturnsSanitizedBadGateway_WhenManagerThrows()
     {
         var controller = CreateController(new FakeCryptoManager
         {
@@ -99,8 +99,7 @@ public class CoinControllerTests
 
         var errorResult = result as ObjectResult;
         Assert.IsNotNull(errorResult);
-        Assert.AreEqual(500, errorResult.StatusCode);
-        Assert.AreEqual("Coin API unavailable", errorResult.Value);
+        Assert.AreEqual(502, errorResult.StatusCode);
     }
 
     private static CoinController CreateController(ICryptoManager manager)

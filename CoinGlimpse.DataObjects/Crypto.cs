@@ -18,6 +18,13 @@ Coin description and maybe usecases  ( optional)
 */
 namespace CoinGlimpse.DataObjects
 {
+    public enum CoinLookupError
+    {
+        None,
+        UnknownCoin,
+        ProviderUnavailable
+    }
+
     public class Crypto : ISecurity
     {
         public decimal Price { get; set; }
@@ -29,6 +36,12 @@ namespace CoinGlimpse.DataObjects
         public string ExchangeInfo { get; set; }
         public long MarketCap { get; set; }
         public long Volume { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string[] CandidateIds { get; set; }
+
+        [System.Text.Json.Serialization.JsonIgnore]
+        public CoinLookupError LookupError { get; set; }
+
         public string msg {get;set;}
     }
 }
