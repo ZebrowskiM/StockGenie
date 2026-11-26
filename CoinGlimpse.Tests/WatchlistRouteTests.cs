@@ -112,13 +112,66 @@ public class WatchlistRouteTests
         Assert.IsTrue(upstream.RetryDelay >= TimeSpan.FromSeconds(1));
     }
 
-    private static async Task<WebApplication> StartApp(QuoteFixture upstream, int maxRetryAttempts = 0)
+    private sealed class FixtureClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; }
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    [TestMethod]
+    [DoNotParallelize]
+    public async Task WatchlistMeasuresProviderAgeAndCountsActualAttempts()
+    {
+        var counts = new System.Collections.Concurrent.ConcurrentDictionary<string, long>();
+        using var listener = new System.Diagnostics.Metrics.MeterListener();
+        listener.InstrumentPublished = (instrument, observer) =>
+        {
+            if (instrument.Meter.Name == "CoinGlimpse.Watchlist")
+                observer.EnableMeasurementEvents(instrument);
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, state) =>
+            counts.AddOrUpdate(instrument.Name, value, (_, count) => count + value));
+        listener.Start();
+
+        var updated = DateTimeOffset.FromUnixTimeSeconds(1700000000);
+        var clock = new FixtureClock { Now = updated.AddSeconds(299) };
+        using var upstream = new QuoteFixture();
+        await using var app = await StartApp(upstream, clock: clock);
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+
+        async Task<JsonDocument> Read(string ids) =>
+            JsonDocument.Parse(await client.GetStringAsync("/api/watchlist?ids=" + ids));
+
+        using var fresh = await Read("coin-0");
+        Assert.IsFalse(fresh.RootElement.GetProperty("quotes")[0].GetProperty("isStale").GetBoolean());
+        clock.Now = updated.AddMinutes(5);
+        using var cached = await Read("coin-0");
+        Assert.IsTrue(cached.RootElement.GetProperty("quotes")[0].GetProperty("isStale").GetBoolean());
+        Assert.AreEqual(1, upstream.Calls);
+
+        using var fetched = await Read("coin-0,missing");
+        Assert.AreEqual(clock.Now, fetched.RootElement.GetProperty("retrievedAt").GetDateTimeOffset());
+        var quotes = fetched.RootElement.GetProperty("quotes");
+        Assert.IsTrue(quotes[0].GetProperty("isStale").GetBoolean());
+        Assert.AreEqual(JsonValueKind.Null, quotes[1].GetProperty("isStale").ValueKind);
+
+        upstream.StatusCode = HttpStatusCode.TooManyRequests;
+        using var limited = await client.GetAsync("/api/watchlist?ids=another");
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        Assert.AreEqual(3L, counts["watchlist.upstream.requests"]);
+        Assert.AreEqual(1L, counts["watchlist.cache.hits"]);
+        Assert.AreEqual(1L, counts["watchlist.upstream.rate_limits"]);
+    }
+
+    private static async Task<WebApplication> StartApp(QuoteFixture upstream, int maxRetryAttempts = 0, TimeProvider clock = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Configuration["CoinGecko:ApiKey"] = "fixture";
         builder.Configuration["CoinGecko:MaxRetryAttempts"] = maxRetryAttempts.ToString(System.Globalization.CultureInfo.InvariantCulture);
         new Startup(builder.Configuration).ConfigureServices(builder.Services);
+        if (clock != null)
+            builder.Services.AddSingleton(clock);
         builder.Services.AddControllers().AddApplicationPart(typeof(Startup).Assembly);
         builder.Services.AddHttpClient(nameof(ICryptoManager)).ConfigurePrimaryHttpMessageHandler(() => upstream);
         var app = builder.Build();

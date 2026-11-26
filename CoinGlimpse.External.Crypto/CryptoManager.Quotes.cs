@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -9,13 +10,21 @@ using System.Threading.Tasks;
 
 namespace CoinGlimpse.External.Crypto
 {
-    public sealed record CoinQuote(string CoinId, decimal? Price, DateTimeOffset? ProviderUpdatedAt);
+    public sealed record CoinQuote(string CoinId, decimal? Price, DateTimeOffset? ProviderUpdatedAt)
+    {
+        public bool? IsStale { get; init; }
+    }
 
     public sealed record CoinQuoteBatch(
         string Currency, DateTimeOffset RetrievedAt, IReadOnlyList<CoinQuote> Quotes);
 
     public partial class CryptoManager
     {
+        private const string QuoteEndpoint = "simple/price";
+        private static readonly Meter WatchlistMeter = new("CoinGlimpse.Watchlist");
+        private static readonly Counter<long> UpstreamRequests = WatchlistMeter.CreateCounter<long>("watchlist.upstream.requests");
+        private static readonly Counter<long> CacheHits = WatchlistMeter.CreateCounter<long>("watchlist.cache.hits");
+        private static readonly Counter<long> RateLimits = WatchlistMeter.CreateCounter<long>("watchlist.upstream.rate_limits");
         private static readonly TimeSpan QuoteRequestBudget = TimeSpan.FromSeconds(10);
         private readonly CoinQuoteCache _quoteCache;
 
@@ -52,18 +61,20 @@ namespace CoinGlimpse.External.Crypto
                     ConvertCredentialToHash(apiKey), normalizedCurrency, joinedIds)
                 : default;
             if (cacheEnabled && _quoteCache.Get(key) is { } cached)
-                return cached;
+            {
+                CacheHits.Add(1);
+                return WithFreshness(cached, _quoteCache.GetUtcNow());
+            }
 
-            const string endpoint = "simple/price";
             var query = $"ids={Uri.EscapeDataString(joinedIds)}" +
                 $"&vs_currencies={normalizedCurrency}&include_last_updated_at=true";
             using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var startedAt = Stopwatch.GetTimestamp();
             requestTimeout.CancelAfter(QuoteRequestBudget);
-            using var response = await SendWithRetryAsync(endpoint, $"{endpoint}?{query}",
+            using var response = await SendWithRetryAsync(QuoteEndpoint, $"{QuoteEndpoint}?{query}",
                 requestTimeout.Token, (plan, apiKey), (startedAt, QuoteRequestBudget)).ConfigureAwait(false);
             var rows = await ReadJsonAsync<Dictionary<string, Dictionary<string, decimal?>>>(
-                response, endpoint, requestTimeout.Token).ConfigureAwait(false);
+                response, QuoteEndpoint, requestTimeout.Token).ConfigureAwait(false);
             var retrievedAt = _quoteCache.GetUtcNow();
 
             var quotes = normalizedIds.Select(id =>
@@ -80,7 +91,18 @@ namespace CoinGlimpse.External.Crypto
             if (cacheEnabled)
                 _quoteCache.Store(key, batch, duration, capacity);
 
-            return batch;
+            return WithFreshness(batch, retrievedAt);
+        }
+
+        private CoinQuoteBatch WithFreshness(CoinQuoteBatch batch, DateTimeOffset now)
+        {
+            var quotes = batch.Quotes.Select(quote => quote with
+            {
+                IsStale = quote.Price.HasValue && quote.ProviderUpdatedAt is { } updated && updated <= now
+                    ? now - updated >= _options.QuoteMaxAge
+                    : null
+            }).ToArray();
+            return batch with { Quotes = Array.AsReadOnly(quotes) };
         }
 
         private static string ConvertCredentialToHash(string apiKey) =>

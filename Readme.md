@@ -100,6 +100,13 @@ budget, including retry delays. CoinGlimpse honors both forms of CoinGecko's
 `Retry-After` header. When a rate-limit delay does not fit the remaining
 budget, the API returns HTTP 429 promptly and forwards the retry guidance.
 
+Each quote includes `isStale`. It becomes true when the provider price reaches
+`CoinGecko:QuoteMaxAge` (five minutes by default), including on cache hits.
+A missing price or a missing or future provider timestamp yields null.
+The .NET meter `CoinGlimpse.Watchlist` exposes `watchlist.upstream.requests`
+(including retries), `watchlist.cache.hits`, and `watchlist.upstream.rate_limits`
+(one per upstream HTTP 429). These counters have no credential or coin ID tags.
+
 ### Watchlist quote cache
 
 `CryptoManager.GetQuotesAsync` caches equivalent ID sets per currency, CoinGecko

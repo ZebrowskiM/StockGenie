@@ -261,10 +261,14 @@ namespace CoinGlimpse.External.Crypto
                 HttpResponseMessage response;
                 try
                 {
+                    if (endpoint == QuoteEndpoint)
+                        UpstreamRequests.Add(1);
                     response = await _httpClient.SendAsync(
                         request,
                         HttpCompletionOption.ResponseHeadersRead,
                         cancellationToken).ConfigureAwait(false);
+                    if (endpoint == QuoteEndpoint && (int)response.StatusCode == 429)
+                        RateLimits.Add(1);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
