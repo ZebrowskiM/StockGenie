@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -15,6 +16,7 @@ namespace CoinGlimpse.External.Crypto
 
     public partial class CryptoManager
     {
+        private static readonly TimeSpan QuoteRequestBudget = TimeSpan.FromSeconds(10);
         private readonly CoinQuoteCache _quoteCache;
 
         public const int MaxQuoteIds = 50;
@@ -55,10 +57,13 @@ namespace CoinGlimpse.External.Crypto
             const string endpoint = "simple/price";
             var query = $"ids={Uri.EscapeDataString(joinedIds)}" +
                 $"&vs_currencies={normalizedCurrency}&include_last_updated_at=true";
-            using var response = await SendWithRetryAsync(endpoint, $"{endpoint}?{query}", cancellationToken, (plan, apiKey))
-                .ConfigureAwait(false);
+            using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var startedAt = Stopwatch.GetTimestamp();
+            requestTimeout.CancelAfter(QuoteRequestBudget);
+            using var response = await SendWithRetryAsync(endpoint, $"{endpoint}?{query}",
+                requestTimeout.Token, (plan, apiKey), (startedAt, QuoteRequestBudget)).ConfigureAwait(false);
             var rows = await ReadJsonAsync<Dictionary<string, Dictionary<string, decimal?>>>(
-                response, endpoint, cancellationToken).ConfigureAwait(false);
+                response, endpoint, requestTimeout.Token).ConfigureAwait(false);
             var retrievedAt = _quoteCache.GetUtcNow();
 
             var quotes = normalizedIds.Select(id =>

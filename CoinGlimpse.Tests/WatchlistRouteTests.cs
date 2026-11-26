@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -63,12 +64,60 @@ public class WatchlistRouteTests
         Assert.AreEqual(2, upstream.Calls);
     }
 
-    private static async Task<WebApplication> StartApp(QuoteFixture upstream)
+    [TestMethod]
+    public async Task WatchlistForwardsRetryAfterWhenTheDelayExceedsItsBudget()
+    {
+        var retryHints = new[]
+        {
+            new RetryConditionHeaderValue(TimeSpan.FromHours(1)),
+            new RetryConditionHeaderValue(DateTimeOffset.UtcNow.AddHours(1))
+        };
+
+        foreach (var hint in retryHints)
+        {
+            using var upstream = new QuoteFixture
+            {
+                StatusCode = HttpStatusCode.TooManyRequests,
+                RetryAfter = hint
+            };
+            await using var app = await StartApp(upstream, maxRetryAttempts: 2);
+            using var client = new HttpClient
+            {
+                BaseAddress = new Uri(app.Urls.Single()),
+                Timeout = TimeSpan.FromSeconds(5)
+            };
+
+            using var result = await client.GetAsync("/api/watchlist?ids=coin-0");
+            Assert.AreEqual(HttpStatusCode.TooManyRequests, result.StatusCode);
+            Assert.AreEqual(hint.ToString(), result.Headers.RetryAfter?.ToString());
+            Assert.AreEqual(1, upstream.Calls);
+        }
+    }
+
+    [TestMethod]
+    public async Task WatchlistRetriesWhenRetryAfterFitsItsBudget()
+    {
+        using var upstream = new QuoteFixture
+        {
+            StatusCode = HttpStatusCode.TooManyRequests,
+            RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(1)),
+            SucceedAfterFirstCall = true
+        };
+        await using var app = await StartApp(upstream, maxRetryAttempts: 1);
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+
+        using var result = await client.GetAsync("/api/watchlist?ids=coin-0");
+        Assert.AreEqual(HttpStatusCode.OK, result.StatusCode);
+        Assert.AreEqual(2, upstream.Calls);
+        Assert.IsTrue(upstream.RetryDelay >= TimeSpan.FromSeconds(1));
+    }
+
+    private static async Task<WebApplication> StartApp(QuoteFixture upstream, int maxRetryAttempts = 0)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Configuration["CoinGecko:ApiKey"] = "fixture";
-        builder.Configuration["CoinGecko:MaxRetryAttempts"] = "0";
+        builder.Configuration["CoinGecko:MaxRetryAttempts"] = maxRetryAttempts.ToString(System.Globalization.CultureInfo.InvariantCulture);
         new Startup(builder.Configuration).ConfigureServices(builder.Services);
         builder.Services.AddControllers().AddApplicationPart(typeof(Startup).Assembly);
         builder.Services.AddHttpClient(nameof(ICryptoManager)).ConfigurePrimaryHttpMessageHandler(() => upstream);
@@ -80,6 +129,10 @@ public class WatchlistRouteTests
 
     private sealed class QuoteFixture : HttpMessageHandler
     {
+        private long _firstCall;
+        public RetryConditionHeaderValue RetryAfter { get; set; }
+        public bool SucceedAfterFirstCall { get; set; }
+        public TimeSpan RetryDelay { get; private set; }
         public int Calls { get; private set; }
         public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.OK;
 
@@ -87,10 +140,19 @@ public class WatchlistRouteTests
         {
             Calls++;
             Assert.AreEqual("/api/v3/simple/price", request.RequestUri.AbsolutePath);
-            return Task.FromResult(new HttpResponseMessage(StatusCode)
+            if (Calls == 1)
+                _firstCall = System.Diagnostics.Stopwatch.GetTimestamp();
+            else
+                RetryDelay = System.Diagnostics.Stopwatch.GetElapsedTime(_firstCall);
+
+            var status = Calls > 1 && SucceedAfterFirstCall ? HttpStatusCode.OK : StatusCode;
+            var result = new HttpResponseMessage(status)
             {
                 Content = new StringContent("""{"coin-0":{"usd":1.25,"last_updated_at":1700000000}}""")
-            });
+            };
+            if (status == HttpStatusCode.TooManyRequests)
+                result.Headers.RetryAfter = RetryAfter;
+            return Task.FromResult(result);
         }
     }
 }

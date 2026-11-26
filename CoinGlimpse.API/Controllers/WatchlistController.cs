@@ -31,6 +31,9 @@ namespace CoinGlimpse.Controllers
             }
             catch (CoinGeckoApiException ex) when (ex.StatusCode == StatusCodes.Status429TooManyRequests)
             {
+                if (ex.RetryAfter is { } retryAfter)
+                    Response.Headers["Retry-After"] = retryAfter.ToString();
+
                 return StatusCode(StatusCodes.Status429TooManyRequests, new
                 {
                     code = "provider_rate_limited",

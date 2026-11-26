@@ -95,7 +95,10 @@ The response contains `currency`, `retrievedAt`, and an array of `quotes` with
 `coinId`, `price`, and `providerUpdatedAt`. Missing prices and provider timestamps
 are returned as null, and cached responses retain their original retrieval time.
 Invalid input returns HTTP 400. Provider rate limits return HTTP 429 and other
-provider failures return HTTP 502.
+provider failures return HTTP 502. Watchlist upstream calls have a ten-second
+budget, including retry delays. CoinGlimpse honors both forms of CoinGecko's
+`Retry-After` header. When a rate-limit delay does not fit the remaining
+budget, the API returns HTTP 429 promptly and forwards the retry guidance.
 
 ### Watchlist quote cache
 
