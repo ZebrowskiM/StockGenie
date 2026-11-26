@@ -313,6 +313,50 @@ public class CryptoManagerTests
             })));
     }
 
+    [TestMethod]
+    public async Task GetQuotesAsync_BatchesTenIdsAndPreservesMissingPrices()
+    {
+        var calls = 0;
+        using var handler = new StubHttpMessageHandler(request =>
+        {
+            calls++;
+            Assert.AreEqual("/api/v3/simple/price", request.RequestUri.AbsolutePath);
+            var query = Uri.UnescapeDataString(request.RequestUri.Query);
+            StringAssert.Contains(query, "ids=coin-0,coin-1,coin-2,coin-3,coin-4,coin-5,coin-6,coin-7,coin-8,coin-9&");
+            StringAssert.Contains(query, "vs_currencies=eur&include_last_updated_at=true");
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"coin-0":{"eur":0.00001001,"last_updated_at":1700000000},"coin-1":{"eur":null}}""")
+            };
+        });
+        var manager = CreateManager(handler, CoinGeckoPlan.Demo);
+        var ids = Enumerable.Range(0, 10).Reverse().Select(i => $"coin-{i}").Append(" COIN-0 ");
+
+        var result = await manager.GetQuotesAsync(ids, " EUR ");
+
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual("EUR", result.Currency);
+        Assert.AreEqual(10, result.Quotes.Count);
+        Assert.AreEqual(0.00001001m, result.Quotes[0].Price);
+        Assert.AreEqual(DateTimeOffset.FromUnixTimeSeconds(1700000000), result.Quotes[0].ProviderUpdatedAt);
+        Assert.IsTrue(result.RetrievedAt > result.Quotes[0].ProviderUpdatedAt);
+        Assert.IsNull(result.Quotes[1].Price);
+        Assert.IsNull(result.Quotes[9].ProviderUpdatedAt);
+        Assert.AreEqual("coin-9", result.Quotes[9].CoinId);
+    }
+
+    [TestMethod]
+    public async Task GetQuotesAsync_RejectsMalformedOrOversizedInputBeforeCallingUpstream()
+    {
+        using var handler = new StubHttpMessageHandler(_ => throw new InvalidOperationException("Unexpected request."));
+        var manager = CreateManager(handler, CoinGeckoPlan.Demo);
+
+        await Assert.ThrowsExceptionAsync<ArgumentException>(() => manager.GetQuotesAsync(new[] { "bitcoin,ethereum" }));
+        await Assert.ThrowsExceptionAsync<ArgumentException>(() => manager.GetQuotesAsync(new[] { "bitcoin" }, "usd,eur"));
+        await Assert.ThrowsExceptionAsync<ArgumentException>(() =>
+            manager.GetQuotesAsync(Enumerable.Repeat("bitcoin", CryptoManager.MaxQuoteIds + 1)));
+    }
+
     private static CryptoManager CreateManager(
         HttpMessageHandler handler,
         CoinGeckoPlan plan,

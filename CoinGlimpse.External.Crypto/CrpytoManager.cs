@@ -15,7 +15,7 @@ using Microsoft.Extensions.Options;
 
 namespace CoinGlimpse.External.Crypto
 {
-    public class CryptoManager : ICryptoManager
+    public partial class CryptoManager : ICryptoManager
     {
         private const long MaxResponseSize = 10 * 1024 * 1024;
         private static readonly Random Jitter = new Random();
