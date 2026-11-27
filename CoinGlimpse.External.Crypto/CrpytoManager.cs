@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -15,7 +16,7 @@ using Microsoft.Extensions.Options;
 
 namespace CoinGlimpse.External.Crypto
 {
-    public class CryptoManager : ICryptoManager
+    public partial class CryptoManager : ICryptoManager
     {
         private const long MaxResponseSize = 10 * 1024 * 1024;
         private static readonly Random Jitter = new Random();
@@ -23,19 +24,24 @@ namespace CoinGlimpse.External.Crypto
         private readonly HttpClient _httpClient;
         private readonly ILogger<CryptoManager> _logger;
         private readonly CoinGeckoOptions _options;
+        private readonly TimeProvider _clock;
         private readonly CoinCatalogCache _catalog;
 
         public CryptoManager(
             HttpClient httpClient,
             ILogger<CryptoManager> logger,
             IOptions<CoinGeckoOptions> options,
-            CoinCatalogCache catalog = null)
+            CoinCatalogCache catalog = null,
+            CoinQuoteCache quoteCache = null,
+            TimeProvider clock = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
 
-            _catalog = catalog ?? new CoinCatalogCache(TimeProvider.System);
+            _clock = clock ?? quoteCache?.Clock ?? TimeProvider.System;
+            _catalog = catalog ?? new CoinCatalogCache(_clock);
+            _quoteCache = quoteCache ?? new CoinQuoteCache(_clock);
             ValidateBaseUrl();
             ConfigureHttpClient();
         }
@@ -222,21 +228,27 @@ namespace CoinGlimpse.External.Crypto
         private async Task<HttpResponseMessage> SendWithRetryAsync(
             string endpoint,
             string relativeUrl,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            (CoinGeckoPlan Plan, string ApiKey)? credentials = null,
+            (long StartedAt, TimeSpan Duration)? requestBudget = null,
+            CoinQuoteCache.Provider? quoteProvider = null)
         {
+            var (plan, apiKey) = credentials ?? (_options.Plan, _options.ApiKey);
             var retryAttempts = Math.Clamp(_options.MaxRetryAttempts, 0, 5);
 
             for (var attempt = 0; ; attempt++)
             {
+                if (quoteProvider is { } provider)
+                    _quoteCache.CheckCooldown(provider);
                 using var request = new HttpRequestMessage(HttpMethod.Get, relativeUrl);
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-                if (!string.IsNullOrWhiteSpace(_options.ApiKey))
+                if (!string.IsNullOrWhiteSpace(apiKey))
                 {
-                    var headerName = _options.Plan == CoinGeckoPlan.Pro
+                    var headerName = plan == CoinGeckoPlan.Pro
                         ? "x-cg-pro-api-key"
                         : "x-cg-demo-api-key";
-                    request.Headers.TryAddWithoutValidation(headerName, _options.ApiKey);
+                    request.Headers.TryAddWithoutValidation(headerName, apiKey);
                 }
 
                 var requestLoggingEnabled = _options.EnableRequestLogging;
@@ -255,10 +267,14 @@ namespace CoinGlimpse.External.Crypto
                 HttpResponseMessage response;
                 try
                 {
+                    if (endpoint == QuoteEndpoint)
+                        UpstreamRequests.Add(1);
                     response = await _httpClient.SendAsync(
                         request,
                         HttpCompletionOption.ResponseHeadersRead,
                         cancellationToken).ConfigureAwait(false);
+                    if (endpoint == QuoteEndpoint && (int)response.StatusCode == 429)
+                        RateLimits.Add(1);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -341,18 +357,27 @@ namespace CoinGlimpse.External.Crypto
                     response.StatusCode == (HttpStatusCode)429 ||
                     statusCode >= 500;
 
+                var retryAfter = response.Headers.RetryAfter;
+                TimeSpan? providerDelay = retryAfter?.Delta;
+                if (quoteProvider.HasValue && retryAfter?.Date is DateTimeOffset retryDate)
+                    providerDelay = retryDate - _clock.GetUtcNow();
+                if (statusCode == 429 && quoteProvider is { } limitedProvider)
+                {
+                    providerDelay ??= TimeSpan.FromSeconds(1);
+                    _quoteCache.RecordCooldown(limitedProvider, providerDelay.Value);
+                    retryAfter ??= new RetryConditionHeaderValue(providerDelay.Value);
+                }
                 if (retryable && attempt < retryAttempts)
                 {
-                    var retryAfter = response.Headers.RetryAfter?.Delta;
-                    response.Dispose();
-                    await DelayBeforeRetryAsync(
-                        attempt,
-                        endpoint,
-                        retryAfter,
-                        cancellationToken,
-                        statusCode,
-                        "RetryableHttpStatus").ConfigureAwait(false);
-                    continue;
+                    var delay = GetRetryDelay(attempt, providerDelay, capDelay: !requestBudget.HasValue);
+                    if (requestBudget is not { } budget ||
+                        delay < budget.Duration - TimeSpan.FromSeconds(1) - Stopwatch.GetElapsedTime(budget.StartedAt))
+                    {
+                        response.Dispose();
+                        await WaitBeforeRetryAsync(attempt, endpoint, delay, cancellationToken,
+                            statusCode, "RetryableHttpStatus").ConfigureAwait(false);
+                        continue;
+                    }
                 }
 
                 if (requestLoggingEnabled)
@@ -372,29 +397,35 @@ namespace CoinGlimpse.External.Crypto
                 }
 
                 response.Dispose();
-                throw new CoinGeckoApiException(statusCode, "CoinGecko rejected the request.");
+                throw new CoinGeckoApiException(statusCode, "CoinGecko rejected the request.", retryAfter);
             }
         }
 
-        private async Task DelayBeforeRetryAsync(
+        private Task DelayBeforeRetryAsync(
             int attempt,
             string endpoint,
             TimeSpan? retryAfter,
             CancellationToken cancellationToken,
             int? statusCode,
-            string reason)
+            string reason) =>
+            WaitBeforeRetryAsync(attempt, endpoint, GetRetryDelay(attempt, retryAfter, capDelay: true),
+                cancellationToken, statusCode, reason);
+
+        private static TimeSpan GetRetryDelay(int attempt, TimeSpan? retryAfter, bool capDelay)
         {
-            var delay = retryAfter.HasValue
-                ? retryAfter.Value
-                : TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt));
-
-            if (delay > TimeSpan.FromSeconds(30))
-            {
+            var delay = retryAfter ?? TimeSpan.FromMilliseconds(250 * Math.Pow(2, attempt));
+            if (delay < TimeSpan.Zero)
+                delay = TimeSpan.Zero;
+            if (capDelay && delay > TimeSpan.FromSeconds(30))
                 delay = TimeSpan.FromSeconds(30);
-            }
 
-            delay += TimeSpan.FromMilliseconds(Jitter.Next(0, 100));
+            return delay + TimeSpan.FromMilliseconds(Jitter.Next(0, 100));
+        }
 
+        private async Task WaitBeforeRetryAsync(
+            int attempt, string endpoint, TimeSpan delay, CancellationToken cancellationToken,
+            int? statusCode, string reason)
+        {
             _logger.LogWarning(
                 "Retrying CoinGecko request. Endpoint={Endpoint} Attempt={Attempt} Status={StatusCode} Reason={Reason} DelayMs={DelayMs}",
                 endpoint,
@@ -555,6 +586,13 @@ namespace CoinGlimpse.External.Crypto
             StatusCode = statusCode;
         }
 
+        internal CoinGeckoApiException(int statusCode, string message, RetryConditionHeaderValue retryAfter)
+            : this(statusCode, message)
+        {
+            RetryAfter = retryAfter;
+        }
+
         public int StatusCode { get; }
+        public RetryConditionHeaderValue RetryAfter { get; }
     }
 }

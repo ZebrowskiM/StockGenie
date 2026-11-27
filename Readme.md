@@ -87,6 +87,45 @@ The client uses a 30-second timeout, disables automatic redirects, and observes
 request cancellation. Retry delays honor `Retry-After` when supplied and are
 capped at 30 seconds. Responses larger than 10 MB are rejected.
 
+## Watchlist quotes
+
+Call `GET /api/watchlist?ids=bitcoin,ethereum&currency=usd` with one to 50
+comma-separated CoinGecko IDs from `/api/coin/list`. Currency defaults to USD.
+The response contains `currency`, `retrievedAt`, and an array of `quotes` with
+`coinId`, `price`, and `providerUpdatedAt`. Missing prices and provider timestamps
+are returned as null, and cached responses retain their original retrieval time.
+Invalid input returns HTTP 400. Provider rate limits return HTTP 429 and other
+provider failures return HTTP 502. Watchlist upstream calls have a ten-second
+budget, including retry delays. CoinGlimpse honors both forms of CoinGecko's
+`Retry-After` header. When a rate-limit delay does not fit the remaining
+budget, the API returns HTTP 429 promptly and forwards the retry guidance.
+
+Each quote includes `isStale`. It becomes true when the provider price reaches
+`CoinGecko:QuoteMaxAge` (five minutes by default), including on cache hits.
+A missing price or a missing or future provider timestamp yields null.
+The .NET meter `CoinGlimpse.Watchlist` exposes `watchlist.upstream.requests`
+(including retries), `watchlist.cache.hits`, and `watchlist.upstream.rate_limits`
+(one per upstream HTTP 429). These counters have no credential or coin ID tags.
+
+### Watchlist quote cache
+
+`CryptoManager.GetQuotesAsync` caches equivalent ID sets per currency, CoinGecko
+base URL, plan, and key. The ASP.NET Core host shares the cache across requests.
+Directly constructed managers use their own cache unless given a shared one.
+`CoinGecko:QuoteCacheDuration` defaults to `00:01:00` and
+`CoinGecko:QuoteCacheCapacity` defaults to 128 batches. Set either to zero to
+disable caching. Reads refresh on demand after expiry and keep the original
+retrieval timestamp on cache hits. Concurrent equivalent misses share one fetch.
+Cancelling a caller ends its wait. A provider 429 pauses new watchlist fetches
+across batches using the same provider, plan and credential in this process.
+Cached quotes remain available. Without retry guidance the pause is one second.
+Retries reserve at least one second of the budget for the next attempt.
+
+The sample host has no per-client rate limit. Different ID sets can spend
+credits from the same key. Before sharing a deployment, authenticate callers
+and enforce per-client quotas at the host or gateway. A successful empty
+provider result uses the normal short cache lifetime and returns null prices.
+
 ## Logging
 
 The wrapper uses the application-provided `ILogger`. Set
