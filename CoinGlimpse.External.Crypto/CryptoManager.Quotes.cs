@@ -18,7 +18,13 @@ namespace CoinGlimpse.External.Crypto
     public sealed record CoinQuoteBatch(
         string Currency, DateTimeOffset RetrievedAt, IReadOnlyList<CoinQuote> Quotes);
 
-    public partial class CryptoManager
+    public interface IQuoteService
+    {
+        Task<CoinQuoteBatch> GetQuotesAsync(IEnumerable<string> ids, string currency = "usd",
+            CancellationToken cancellationToken = default);
+    }
+
+    public partial class CryptoManager : IQuoteService
     {
         private const string QuoteEndpoint = "simple/price";
         private static readonly Meter WatchlistMeter = new("CoinGlimpse.Watchlist");
@@ -53,29 +59,29 @@ namespace CoinGlimpse.External.Crypto
             var joinedIds = string.Join(",", normalizedIds);
             var plan = _options.Plan;
             var apiKey = _options.ApiKey;
-            var duration = _options.QuoteCacheDuration;
-            var capacity = _options.QuoteCacheCapacity;
-            var cacheEnabled = duration > TimeSpan.Zero && capacity > 0;
-            var key = cacheEnabled
-                ? new CoinQuoteCache.Key(_httpClient.BaseAddress, plan,
-                    ConvertCredentialToHash(apiKey), normalizedCurrency, joinedIds)
-                : default;
-            if (cacheEnabled && _quoteCache.Get(key) is { } cached)
-            {
+            var provider = new CoinQuoteCache.Provider(_httpClient.BaseAddress, plan, ConvertCredentialToHash(apiKey));
+            var key = new CoinQuoteCache.Key(provider, normalizedCurrency, joinedIds);
+            var pending = _quoteCache.GetOrFetch(key, _options.QuoteCacheDuration, _options.QuoteCacheCapacity,
+                () => FetchQuotesAsync(key, normalizedIds, apiKey), out var hit);
+            if (hit)
                 CacheHits.Add(1);
-                return WithFreshness(cached, _quoteCache.GetUtcNow());
-            }
+            var batch = await pending.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return WithFreshness(batch, _clock.GetUtcNow());
+        }
 
+        private async Task<CoinQuoteBatch> FetchQuotesAsync(CoinQuoteCache.Key key, string[] normalizedIds, string apiKey)
+        {
+            var normalizedCurrency = key.Currency;
+            var joinedIds = key.Ids;
             var query = $"ids={Uri.EscapeDataString(joinedIds)}" +
                 $"&vs_currencies={normalizedCurrency}&include_last_updated_at=true";
-            using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            using var requestTimeout = new CancellationTokenSource(QuoteRequestBudget, _clock);
             var startedAt = Stopwatch.GetTimestamp();
-            requestTimeout.CancelAfter(QuoteRequestBudget);
             using var response = await SendWithRetryAsync(QuoteEndpoint, $"{QuoteEndpoint}?{query}",
-                requestTimeout.Token, (plan, apiKey), (startedAt, QuoteRequestBudget)).ConfigureAwait(false);
+                requestTimeout.Token, (key.Provider.Plan, apiKey), (startedAt, QuoteRequestBudget), key.Provider).ConfigureAwait(false);
             var rows = await ReadJsonAsync<Dictionary<string, Dictionary<string, decimal?>>>(
                 response, QuoteEndpoint, requestTimeout.Token).ConfigureAwait(false);
-            var retrievedAt = _quoteCache.GetUtcNow();
+            var retrievedAt = _clock.GetUtcNow();
 
             var quotes = normalizedIds.Select(id =>
             {
@@ -87,11 +93,7 @@ namespace CoinGlimpse.External.Crypto
                     : (DateTimeOffset?)null;
                 return new CoinQuote(id, price, updatedAt);
             }).ToArray();
-            var batch = new CoinQuoteBatch(normalizedCurrency.ToUpperInvariant(), retrievedAt, Array.AsReadOnly(quotes));
-            if (cacheEnabled)
-                _quoteCache.Store(key, batch, duration, capacity);
-
-            return WithFreshness(batch, retrievedAt);
+            return new CoinQuoteBatch(normalizedCurrency.ToUpperInvariant(), retrievedAt, Array.AsReadOnly(quotes));
         }
 
         private CoinQuoteBatch WithFreshness(CoinQuoteBatch batch, DateTimeOffset now)

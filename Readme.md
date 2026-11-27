@@ -115,7 +115,16 @@ Directly constructed managers use their own cache unless given a shared one.
 `CoinGecko:QuoteCacheDuration` defaults to `00:01:00` and
 `CoinGecko:QuoteCacheCapacity` defaults to 128 batches. Set either to zero to
 disable caching. Reads refresh on demand after expiry and keep the original
-retrieval timestamp on cache hits.
+retrieval timestamp on cache hits. Concurrent equivalent misses share one fetch.
+Cancelling a caller ends its wait. A provider 429 pauses new watchlist fetches
+across batches using the same provider, plan and credential in this process.
+Cached quotes remain available. Without retry guidance the pause is one second.
+Retries reserve at least one second of the budget for the next attempt.
+
+The sample host has no per-client rate limit. Different ID sets can spend
+credits from the same key. Before sharing a deployment, authenticate callers
+and enforce per-client quotas at the host or gateway. A successful empty
+provider result uses the normal short cache lifetime and returns null prices.
 
 ## Logging
 

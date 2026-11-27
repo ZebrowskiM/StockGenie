@@ -24,6 +24,7 @@ namespace CoinGlimpse.External.Crypto
         private readonly HttpClient _httpClient;
         private readonly ILogger<CryptoManager> _logger;
         private readonly CoinGeckoOptions _options;
+        private readonly TimeProvider _clock;
         private readonly CoinCatalogCache _catalog;
 
         public CryptoManager(
@@ -31,14 +32,16 @@ namespace CoinGlimpse.External.Crypto
             ILogger<CryptoManager> logger,
             IOptions<CoinGeckoOptions> options,
             CoinCatalogCache catalog = null,
-            CoinQuoteCache quoteCache = null)
+            CoinQuoteCache quoteCache = null,
+            TimeProvider clock = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
 
-            _catalog = catalog ?? new CoinCatalogCache(TimeProvider.System);
-            _quoteCache = quoteCache ?? new CoinQuoteCache(TimeProvider.System);
+            _clock = clock ?? quoteCache?.Clock ?? TimeProvider.System;
+            _catalog = catalog ?? new CoinCatalogCache(_clock);
+            _quoteCache = quoteCache ?? new CoinQuoteCache(_clock);
             ValidateBaseUrl();
             ConfigureHttpClient();
         }
@@ -227,13 +230,16 @@ namespace CoinGlimpse.External.Crypto
             string relativeUrl,
             CancellationToken cancellationToken,
             (CoinGeckoPlan Plan, string ApiKey)? credentials = null,
-            (long StartedAt, TimeSpan Duration)? requestBudget = null)
+            (long StartedAt, TimeSpan Duration)? requestBudget = null,
+            CoinQuoteCache.Provider? quoteProvider = null)
         {
             var (plan, apiKey) = credentials ?? (_options.Plan, _options.ApiKey);
             var retryAttempts = Math.Clamp(_options.MaxRetryAttempts, 0, 5);
 
             for (var attempt = 0; ; attempt++)
             {
+                if (quoteProvider is { } provider)
+                    _quoteCache.CheckCooldown(provider);
                 using var request = new HttpRequestMessage(HttpMethod.Get, relativeUrl);
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
@@ -352,15 +358,20 @@ namespace CoinGlimpse.External.Crypto
                     statusCode >= 500;
 
                 var retryAfter = response.Headers.RetryAfter;
+                TimeSpan? providerDelay = retryAfter?.Delta;
+                if (quoteProvider.HasValue && retryAfter?.Date is DateTimeOffset retryDate)
+                    providerDelay = retryDate - _clock.GetUtcNow();
+                if (statusCode == 429 && quoteProvider is { } limitedProvider)
+                {
+                    providerDelay ??= TimeSpan.FromSeconds(1);
+                    _quoteCache.RecordCooldown(limitedProvider, providerDelay.Value);
+                    retryAfter ??= new RetryConditionHeaderValue(providerDelay.Value);
+                }
                 if (retryable && attempt < retryAttempts)
                 {
-                    TimeSpan? providerDelay = retryAfter?.Delta;
-                    if (requestBudget.HasValue && retryAfter?.Date is DateTimeOffset retryDate)
-                        providerDelay = retryDate - _quoteCache.GetUtcNow();
-
                     var delay = GetRetryDelay(attempt, providerDelay, capDelay: !requestBudget.HasValue);
                     if (requestBudget is not { } budget ||
-                        delay < budget.Duration - Stopwatch.GetElapsedTime(budget.StartedAt))
+                        delay < budget.Duration - TimeSpan.FromSeconds(1) - Stopwatch.GetElapsedTime(budget.StartedAt))
                     {
                         response.Dispose();
                         await WaitBeforeRetryAsync(attempt, endpoint, delay, cancellationToken,

@@ -35,13 +35,15 @@ namespace CoinGlimpse
             services.AddSingleton(TimeProvider.System);
             services.AddSingleton<CoinCatalogCache>();
             services.AddSingleton<CoinQuoteCache>();
-            services.AddHttpClient<ICryptoManager, CryptoManager>()
+            services.AddHttpClient(nameof(ICryptoManager))
                 .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
                 {
                     AllowAutoRedirect = false,
                     PooledConnectionLifetime = TimeSpan.FromMinutes(5)
                 })
                 .AddTypedClient<CryptoManager>();
+            services.AddTransient<ICryptoManager>(sp => sp.GetRequiredService<CryptoManager>());
+            services.AddTransient<IQuoteService>(sp => sp.GetRequiredService<CryptoManager>());
             services.AddSwaggerGen(c =>
             {
                 c.SwaggerDoc("v1", new OpenApiInfo { Title = "CoinGlimpse", Version = "v1" });

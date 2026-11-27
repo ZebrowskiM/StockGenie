@@ -45,7 +45,8 @@ public class WatchlistRouteTests
     public async Task WatchlistSeparatesInvalidInputRateLimitsAndProviderErrors()
     {
         using var upstream = new QuoteFixture { StatusCode = HttpStatusCode.TooManyRequests };
-        await using var app = await StartApp(upstream);
+        var clock = new FixtureClock { Now = DateTimeOffset.UnixEpoch };
+        await using var app = await StartApp(upstream, clock: clock);
         using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
 
         using var invalid = await client.GetAsync("/api/watchlist?ids=coin-0,,coin-1");
@@ -56,6 +57,11 @@ public class WatchlistRouteTests
         using var limitedBody = JsonDocument.Parse(await limited.Content.ReadAsStringAsync());
         Assert.AreEqual("provider_rate_limited", limitedBody.RootElement.GetProperty("code").GetString());
 
+        using var blocked = await client.GetAsync("/api/watchlist?ids=another&currency=eur");
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, blocked.StatusCode);
+        Assert.AreEqual(TimeSpan.FromSeconds(1), blocked.Headers.RetryAfter.Delta);
+        Assert.AreEqual(1, upstream.Calls);
+        clock.Now += TimeSpan.FromSeconds(1);
         upstream.StatusCode = HttpStatusCode.ServiceUnavailable;
         using var unavailable = await client.GetAsync("/api/watchlist?ids=coin-0");
         Assert.AreEqual(HttpStatusCode.BadGateway, unavailable.StatusCode);
@@ -69,6 +75,7 @@ public class WatchlistRouteTests
     {
         var retryHints = new[]
         {
+            new RetryConditionHeaderValue(TimeSpan.FromSeconds(9)),
             new RetryConditionHeaderValue(TimeSpan.FromHours(1)),
             new RetryConditionHeaderValue(DateTimeOffset.UtcNow.AddHours(1))
         };
@@ -110,6 +117,55 @@ public class WatchlistRouteTests
         Assert.AreEqual(HttpStatusCode.OK, result.StatusCode);
         Assert.AreEqual(2, upstream.Calls);
         Assert.IsTrue(upstream.RetryDelay >= TimeSpan.FromSeconds(1));
+    }
+
+    [TestMethod]
+    public async Task EquivalentMissesShareFetchAfterExpiryWhenOneCallerCancels()
+    {
+        var clock = new FixtureClock { Now = DateTimeOffset.UnixEpoch };
+        using var upstream = new QuoteFixture();
+        await using var app = await StartApp(upstream, clock: clock);
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+        const string route = "/api/watchlist?ids=coin-0";
+        using var warm = await client.GetAsync(route);
+        warm.EnsureSuccessStatusCode();
+        clock.Now += TimeSpan.FromMinutes(1);
+        upstream.Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var survivor = client.GetAsync(route);
+        await upstream.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        using var cancellation = new CancellationTokenSource();
+        var joining = app.Services.GetRequiredService<IQuoteService>()
+            .GetQuotesAsync(new[] { "COIN-0" }, cancellationToken: cancellation.Token);
+        cancellation.Cancel();
+        try
+        {
+            await joining;
+            Assert.Fail("The cancelled caller should stop waiting.");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        finally { upstream.Release.SetResult(); }
+        using var result = await survivor;
+        result.EnsureSuccessStatusCode();
+        Assert.AreEqual(2, upstream.Calls);
+    }
+
+    [TestMethod]
+    public async Task NullBodyAndTimeoutReturn502WhileEmptyObjectPreservesMissingPrices()
+    {
+        using var upstream = new QuoteFixture { Json = "null" };
+        await using var app = await StartApp(upstream);
+        using var client = new HttpClient { BaseAddress = new Uri(app.Urls.Single()) };
+        const string route = "/api/watchlist?ids=unknown&currency=xyz";
+        using var invalid = await client.GetAsync(route);
+        Assert.AreEqual(HttpStatusCode.BadGateway, invalid.StatusCode);
+        upstream.Release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var timeout = await client.GetAsync(route);
+        Assert.AreEqual(HttpStatusCode.BadGateway, timeout.StatusCode);
+        upstream.Release = null;
+        upstream.Json = "{}";
+        using var body = JsonDocument.Parse(await client.GetStringAsync(route));
+        Assert.AreEqual(JsonValueKind.Null, body.RootElement.GetProperty("quotes")[0].GetProperty("price").ValueKind);
+        Assert.AreEqual(3, upstream.Calls);
     }
 
     private sealed class FixtureClock : TimeProvider
@@ -182,6 +238,9 @@ public class WatchlistRouteTests
 
     private sealed class QuoteFixture : HttpMessageHandler
     {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; set; }
+        public string Json { get; set; } = """{"coin-0":{"usd":1.25,"last_updated_at":1700000000}}""";
         private long _firstCall;
         public RetryConditionHeaderValue RetryAfter { get; set; }
         public bool SucceedAfterFirstCall { get; set; }
@@ -189,9 +248,14 @@ public class WatchlistRouteTests
         public int Calls { get; private set; }
         public HttpStatusCode StatusCode { get; set; } = HttpStatusCode.OK;
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
         {
             Calls++;
+            if (Release is { } gate)
+            {
+                Started.TrySetResult();
+                await gate.Task.WaitAsync(token);
+            }
             Assert.AreEqual("/api/v3/simple/price", request.RequestUri.AbsolutePath);
             if (Calls == 1)
                 _firstCall = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -201,11 +265,11 @@ public class WatchlistRouteTests
             var status = Calls > 1 && SucceedAfterFirstCall ? HttpStatusCode.OK : StatusCode;
             var result = new HttpResponseMessage(status)
             {
-                Content = new StringContent("""{"coin-0":{"usd":1.25,"last_updated_at":1700000000}}""")
+                Content = new StringContent(Json)
             };
             if (status == HttpStatusCode.TooManyRequests)
                 result.Headers.RetryAfter = RetryAfter;
-            return Task.FromResult(result);
+            return result;
         }
     }
 }

@@ -12,7 +12,7 @@ namespace CoinGlimpse.Controllers
 {
     [ApiController]
     [Route("api/watchlist")]
-    public sealed class WatchlistController(CryptoManager manager) : ControllerBase
+    public sealed class WatchlistController(IQuoteService manager) : ControllerBase
     {
         [HttpGet]
         public async Task<ActionResult<CoinQuoteBatch>> Get(
