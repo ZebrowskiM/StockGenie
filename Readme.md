@@ -87,6 +87,16 @@ The client uses a 30-second timeout, disables automatic redirects, and observes
 request cancellation. Retry delays honor `Retry-After` when supplied and are
 capped at 30 seconds. Responses larger than 10 MB are rejected.
 
+## Daily price history
+
+Call `await manager.GetDailyPriceHistoryAsync("bitcoin", days: 90)` to fetch
+CoinGecko aggregate prices in USD, or pass another quote currency. Each call
+makes an on-demand market-chart request with `interval=daily` and accepts
+1–365 days. The result contains decimal prices in chronological order, the
+provider’s original UTC observation timestamps and a separate retrieval time.
+These are sampled prices. The latest observation can represent a partial day.
+[CoinGecko Demo market chart documentation](https://docs.coingecko.com/demo/reference/coins-id-market-chart)
+
 ## Watchlist quotes
 
 Call `GET /api/watchlist?ids=bitcoin,ethereum&currency=usd` with one to 50

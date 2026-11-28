@@ -426,6 +426,34 @@ public class CryptoManagerTests
         Assert.AreEqual(4, calls);
     }
 
+    [TestMethod]
+    public async Task DailyHistoryRequestsDailySamplesAndPreservesUtcTimesAndDecimalPrices()
+    {
+        var calls = 0;
+        var handler = new StubHttpMessageHandler(request =>
+        {
+            calls++;
+            Assert.AreEqual("/api/v3/coins/bitcoin/market_chart?vs_currency=eur&days=365&interval=daily",
+                request.RequestUri.PathAndQuery);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"prices":[[1700086400000,2],[1700000000123,0.000000123]]}""")
+            };
+        });
+        var manager = CreateManager(handler, CoinGeckoPlan.Demo);
+        foreach (var days in new[] { 0, 366 })
+            await Assert.ThrowsExceptionAsync<ArgumentOutOfRangeException>(() => manager.GetDailyPriceHistoryAsync("bitcoin", days));
+        Assert.AreEqual(0, calls);
+        var series = await manager.GetDailyPriceHistoryAsync(" Bitcoin ", 365, " EUR ");
+        Assert.AreEqual(1, calls);
+        Assert.AreEqual("bitcoin", series.CoinId);
+        Assert.AreEqual("EUR", series.Currency);
+        Assert.AreEqual(2, series.Prices.Count);
+        Assert.AreEqual(DateTimeOffset.FromUnixTimeMilliseconds(1700000000123), series.Prices[0].Timestamp);
+        Assert.AreEqual(0.000000123m, series.Prices[0].Price);
+        Assert.IsTrue(series.RetrievedAt > series.Prices[1].Timestamp);
+    }
+
     private sealed class QuoteClock : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UnixEpoch;
